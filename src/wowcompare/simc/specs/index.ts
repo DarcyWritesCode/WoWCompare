@@ -34,6 +34,7 @@ import SPECS, { isRetailSpec } from 'game/SPECS';
 
 import { druidBalance, druidGuardian } from './druidBalanceGuardian';
 import druidFeral from './druidFeral';
+import { simcToken } from '../resolve';
 import { SpecAdapter, SpecOverrides } from './types';
 
 /** Spell tables searched for each class's SimC tokens, keyed by WCL class name. */
@@ -80,4 +81,21 @@ export function getAdapter(specId: number): SpecAdapter | undefined {
     ...overrides,
     aliases: overrides.aliases ?? {},
   };
+}
+
+/**
+ * Whether a spell belongs to the spec's class (its spell or talent tables), by ID or name token.
+ * Used to keep trinket, enchant and consumable buffs out of suggestions.
+ */
+export function classSpellMatcher(specId: number): (spellId: number, token: string) => boolean {
+  const adapter = getAdapter(specId);
+  const ids = new Set<number>();
+  const tokens = new Set<string>();
+  for (const table of adapter?.tables ?? []) {
+    for (const spell of Object.values(table)) {
+      ids.add(spell.id);
+      tokens.add(simcToken(spell.name));
+    }
+  }
+  return (spellId, token) => ids.has(spellId) || tokens.has(token);
 }

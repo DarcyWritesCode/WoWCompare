@@ -9,7 +9,11 @@ import BuffMetrics from './BuffMetrics';
 import ConditionRules from './ConditionRules';
 import CooldownMetrics from './CooldownMetrics';
 import DamageTimeline from './DamageTimeline';
-import { LogSnapshot, ProfileResults, scoreProfile } from './results';
+import Enemies from 'parser/shared/modules/Enemies';
+
+import { simcToken } from '../simc/resolve';
+import { mergeIntervals, totalDuration } from './intervals';
+import { AuraUsage, LogSnapshot, ProfileResults, scoreProfile } from './results';
 
 /** Combines the metric modules into one scored, serializable result for the selected profile. */
 class ProfileMetrics extends Analyzer {
@@ -18,11 +22,13 @@ class ProfileMetrics extends Analyzer {
     cooldownMetrics: CooldownMetrics,
     conditionRules: ConditionRules,
     damageTimeline: DamageTimeline,
+    enemies: Enemies,
   };
   protected buffMetrics!: BuffMetrics;
   protected cooldownMetrics!: CooldownMetrics;
   protected conditionRules!: ConditionRules;
   protected damageTimeline!: DamageTimeline;
+  protected enemies!: Enemies;
 
   private readonly profile: Profile | undefined;
 
@@ -71,6 +77,47 @@ class ProfileMetrics extends Analyzer {
     };
   }
 
+  /** Uptime of every buff the player gave themselves and every debuff they applied, by name. */
+  private auraUsage(): AuraUsage[] {
+    const start = this.owner.fight.start_time;
+    const end = this.owner.fight.end_time;
+    const playerId = this.owner.playerId;
+    const groups = new Map<
+      string,
+      {
+        name: string;
+        spellId: number;
+        kind: AuraUsage['kind'];
+        intervals: { start: number; end: number }[];
+      }
+    >();
+    const add =
+      (kind: AuraUsage['kind']) => (aura: (typeof this.selectedCombatant.buffs)[number]) => {
+        if (aura.sourceID !== playerId) {
+          return;
+        }
+        const name = aura.ability.name;
+        const key = `${kind}:${simcToken(name)}`;
+        const group = groups.get(key) ?? { name, spellId: aura.ability.guid, kind, intervals: [] };
+        group.intervals.push({ start: aura.start, end: aura.end ?? end });
+        groups.set(key, group);
+      };
+    this.selectedCombatant.buffs.forEach(add('buff'));
+    Object.values(this.enemies.getEntities()).forEach((enemy) =>
+      enemy.buffs.forEach(add('debuff')),
+    );
+    return [...groups.values()].map((group) => ({
+      token: simcToken(group.name),
+      name: group.name,
+      spellId: group.spellId,
+      kind: group.kind,
+      uptime:
+        end > start
+          ? totalDuration(mergeIntervals(group.intervals, start, end)) / (end - start)
+          : 0,
+    }));
+  }
+
   /** Results plus window timelines: everything this log contributes to a comparison. */
   snapshot(): LogSnapshot | null {
     const results = this.results();
@@ -87,6 +134,7 @@ class ProfileMetrics extends Analyzer {
     this.owner.playerDetails.forEach((player) => (comp[player.role] += 1));
     return {
       results,
+      auras: this.auraUsage(),
       build: { talents, heroTree },
       comp,
       windows: this.cooldownMetrics.active ? this.cooldownMetrics.windowTimelines() : [],

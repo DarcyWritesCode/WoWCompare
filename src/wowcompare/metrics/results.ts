@@ -162,8 +162,20 @@ export interface RaidComp {
   dps: number;
 }
 
+/** A buff the player applied to themselves, or a debuff they applied to enemies. */
+export interface AuraUsage {
+  token: string;
+  name: string;
+  spellId: number;
+  kind: 'buff' | 'debuff';
+  /** Fraction of the fight it was up (debuffs: on any enemy). */
+  uptime: number;
+}
+
 /** Everything a parsed log contributes to the comparison. */
 export interface LogSnapshot {
+  /** Every self-applied buff and player debuff, for suggesting entries the profile lacks. */
+  auras: AuraUsage[];
   results: ProfileResults;
   build: BuildInfo;
   comp: RaidComp;

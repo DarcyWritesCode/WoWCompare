@@ -2,6 +2,7 @@ import { buildProfile, BuiltProfile } from '../simc/buildProfile';
 import { fetchLiveApl } from '../simc/source';
 import { getAdapter } from '../simc/specs';
 import { SpecAdapter } from '../simc/specs/types';
+import { applyCustomization, readCustomization } from './customizations';
 import { Profile } from './types';
 
 /** Bundled APL snapshots, loaded only when the live copy can't be fetched. */
@@ -45,6 +46,15 @@ export function setProfile(specId: number, profile: Profile | null) {
   }
 }
 
+/** Builds the profile and layers on any suggestions the viewer accepted for this spec. */
+function build(adapter: SpecAdapter, text: string, source: Parameters<typeof buildProfile>[2]) {
+  const result = buildProfile(adapter, text, source);
+  return {
+    ...result,
+    profile: applyCustomization(result.profile, readCustomization(adapter.specId)),
+  };
+}
+
 async function load(adapter: SpecAdapter) {
   const url = aplUrl(adapter);
   const source = { kind: 'simc' as const, file: adapter.simcFile, url };
@@ -52,13 +62,13 @@ async function load(adapter: SpecAdapter) {
   if (live) {
     built.set(
       adapter.specId,
-      buildProfile(adapter, live.text, { ...source, live: true, retrievedAt: live.retrievedAt }),
+      build(adapter, live.text, { ...source, live: true, retrievedAt: live.retrievedAt }),
     );
     return;
   }
   const bundled = bundledApls[`../simc/bundled/${adapter.simcFile}.simc`];
   if (bundled) {
-    built.set(adapter.specId, buildProfile(adapter, await bundled(), { ...source, live: false }));
+    built.set(adapter.specId, build(adapter, await bundled(), { ...source, live: false }));
   }
 }
 

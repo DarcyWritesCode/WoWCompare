@@ -5,6 +5,7 @@ import AplExpectations from './AplExpectations';
 import BenchmarkTable from './BenchmarkTable';
 import CooldownDamage from './CooldownDamage';
 import ProfileResultsTable from './ProfileResultsTable';
+import Suggestions from './Suggestions';
 import useBenchmarks, { BenchmarkInputs } from './useBenchmarks';
 import WindowReels from './WindowReels';
 
@@ -26,6 +27,9 @@ export default function ProfileView({
     benchmarkInputs && { ...benchmarkInputs, playerResults: snapshot.results },
   );
   const results = playerResults ?? snapshot.results;
+  const topLogs = logs
+    .filter((log) => log.roles.some((role) => role.startsWith('Top 10')))
+    .map((log) => log.snapshot);
   const source = profile.source;
 
   return (
@@ -73,11 +77,18 @@ export default function ProfileView({
             What the APL asks for, and how often the top 10 parses actually do it. "Favoured" lines
             are ones the APL prefers under a buff without requiring it.
           </p>
-          <AplExpectations
-            player={snapshot.results}
-            topLogs={logs
-              .filter((log) => log.roles.some((role) => role.startsWith('Top 10')))
-              .map((log) => log.snapshot)}
+          <AplExpectations player={snapshot.results} topLogs={topLogs} />
+        </>
+      )}
+
+      {columns && (
+        <>
+          <h2>Suggestions</h2>
+          <Suggestions
+            profile={profile}
+            player={snapshot}
+            topLogs={topLogs}
+            allLogs={[snapshot, ...logs.map((log) => log.snapshot)]}
           />
         </>
       )}
