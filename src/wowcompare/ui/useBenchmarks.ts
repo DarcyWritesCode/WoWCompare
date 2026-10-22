@@ -1,11 +1,16 @@
 import { formatDuration, formatNumber } from 'common/format';
 import Config from 'parser/Config';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { medianResults, rescoreAgainst } from '../benchmarks/aggregate';
 import { parseBenchmarkLog } from '../benchmarks/parseLog';
 import { fetchRankings, RankedParse, RankingsQuery } from '../benchmarks/rankings';
-import { PlayerContext, SAME_BUILD_THRESHOLD, selectBenchmarks } from '../benchmarks/select';
+import {
+  BenchmarkSelection,
+  PlayerContext,
+  SAME_BUILD_THRESHOLD,
+  selectBenchmarks,
+} from '../benchmarks/select';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
 import { describeBuild, describeComp, describeHeroTrees } from './build';
@@ -78,145 +83,237 @@ async function parseAll(
   return snapshots;
 }
 
-/** Fetches rankings, picks the five benchmarks and parses their logs on demand. */
+export type BenchmarkKind = 'top' | 'top10' | 'sameBuild' | 'bestClose' | 'top10Close';
+
+/** Benchmarks in column order. */
+export const BENCHMARK_KINDS: BenchmarkKind[] = [
+  'top',
+  'top10',
+  'sameBuild',
+  'bestClose',
+  'top10Close',
+];
+
+export const BENCHMARK_LABELS: Record<BenchmarkKind, string> = {
+  top: '#1',
+  top10: 'Top 10 median',
+  sameBuild: 'Same build',
+  bestClose: 'Best close',
+  top10Close: 'Top 10 close median',
+};
+
+/** What the player is measured against: the top-10 median once loaded, else the #1 parse. */
+export interface BenchmarkReference {
+  /** e.g. "the top-10 median", "the #1 parse". */
+  label: string;
+  logs: LogSnapshot[];
+}
+
+function parsesFor(selection: BenchmarkSelection, kind: BenchmarkKind): RankedParse[] {
+  switch (kind) {
+    case 'top':
+      return selection.top ? [selection.top] : [];
+    case 'top10':
+      return selection.top10;
+    case 'sameBuild':
+      return selection.sameBuild ? [selection.sameBuild.parse] : [];
+    case 'bestClose':
+      return selection.bestClose ? [selection.bestClose.parse] : [];
+    case 'top10Close':
+      return selection.top10Close.map((c) => c.parse);
+  }
+}
+
+/**
+ * Fetches rankings and the #1 parse straight away; the other benchmarks load on request, since
+ * each costs one or more full log parses.
+ */
 export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
   const [status, setStatus] = useState<string | null>(null);
-  const [columns, setColumns] = useState<BenchmarkColumn[] | null>(null);
-  const [logs, setLogs] = useState<BenchmarkLog[]>([]);
-  /** The player's results scored against the top-10 median, once benchmarks are in. */
-  const [playerResults, setPlayerResults] = useState<ProfileResults | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [rankingCount, setRankingCount] = useState(0);
+  const [selection, setSelection] = useState<BenchmarkSelection | null>(null);
+  const [parsed, setParsed] = useState<Map<RankedParse, LogSnapshot | null>>(new Map());
+  const [loaded, setLoaded] = useState<BenchmarkKind[]>([]);
+  const started = useRef(false);
 
-  const load = async () => {
-    if (!inputs) {
+  const load = async (kind: BenchmarkKind, current = selection) => {
+    if (!inputs || !current || busy) {
       return;
     }
-    const { config, profile, player, query } = inputs;
+    const parses = parsesFor(current, kind).filter((p) => !parsed.has(p));
+    setBusy(true);
     try {
-      setStatus('Fetching rankings…');
-      const rankings = await fetchRankings(query);
-      const selection = selectBenchmarks(rankings, player);
-      const closeParses = selection.top10Close.map((c) => c.parse);
-      const unique = [
-        ...new Set(
-          [...selection.top10, selection.sameBuild?.parse, ...closeParses].filter(
-            (p): p is RankedParse => p !== undefined,
-          ),
-        ),
-      ];
-
       let done = 0;
-      setStatus(`Parsing benchmark logs: 0 / ${unique.length}`);
-      const parsed = await parseAll(config, profile, unique, () => {
+      setStatus(`Loading ${BENCHMARK_LABELS[kind]}: 0 / ${parses.length} logs`);
+      const fresh = await parseAll(inputs.config, inputs.profile, parses, () => {
         done += 1;
-        setStatus(`Parsing benchmark logs: ${done} / ${unique.length}`);
+        setStatus(`Loading ${BENCHMARK_LABELS[kind]}: ${done} / ${parses.length} logs`);
       });
-      const snapshotsOf = (parses: RankedParse[]) =>
-        parses.map((p) => parsed.get(p)).filter((r): r is LogSnapshot => !!r);
-      const single = (
-        title: string,
-        parse: RankedParse | undefined,
-        note = '',
-      ): BenchmarkColumn => {
-        const snapshot = parse && parsed.get(parse);
-        if (!parse || !snapshot) {
-          return {
-            title,
-            subtitle: parse ? `${describeParse(parse)} · failed to load` : 'none',
-            results: null,
-            snapshots: [],
-          };
-        }
-        const build = describeBuild(snapshot.build, player.talents);
-        return {
-          title,
-          subtitle: describeParse(parse) + note,
-          results: snapshot.results,
-          build: build.summary,
-          buildTooltip: build.tooltip,
-          comp: describeComp(snapshot.comp),
-          snapshots: [snapshot],
-        };
-      };
-      const median = (title: string, parses: RankedParse[], note = ''): BenchmarkColumn => {
-        const snapshots = snapshotsOf(parses);
-        return {
-          title,
-          subtitle: `${snapshots.length} logs${note}`,
-          results: medianResults(
-            profile,
-            snapshots.map((s) => s.results),
-          ),
-          build: describeHeroTrees(snapshots),
-          snapshots,
-        };
-      };
-      const closeCount = selection.top10Close.filter((c) => c.withinBounds).length;
-
-      const reference = medianResults(
-        profile,
-        snapshotsOf(selection.top10).map((s) => s.results),
-      );
-      const rescore = (column: BenchmarkColumn): BenchmarkColumn => ({
-        ...column,
-        results: column.results && rescoreAgainst(column.results, reference),
-      });
-      setPlayerResults(rescoreAgainst(inputs.playerResults, reference));
-      setColumns(
-        [
-          single('#1', selection.top),
-          median('Top 10 median', selection.top10),
-          single(
-            'Same build',
-            selection.sameBuild?.parse,
-            selection.sameBuild && selection.sameBuild.similarity < SAME_BUILD_THRESHOLD
-              ? ' (closest build)'
-              : '',
-          ),
-          single(
-            'Best close',
-            selection.bestClose?.parse,
-            selection.bestClose?.withinBounds ? '' : ' (nearest, outside bounds)',
-          ),
-          median('Top 10 close median', closeParses, `, ${closeCount} within bounds`),
-        ].map(rescore),
-      );
-
-      // Individual logs for the window timelines, the single-parse benchmarks first.
-      const rolesOf = (parse: RankedParse) =>
-        [
-          parse === selection.top && '#1',
-          parse === selection.sameBuild?.parse && 'Same build',
-          parse === selection.bestClose?.parse && 'Best close',
-          selection.top10.includes(parse) && `Top 10 #${parse.rank}`,
-          closeParses.includes(parse) && 'Close',
-        ].filter((role): role is string => !!role);
-      setLogs(
-        unique
-          .map((parse) => ({ parse, snapshot: parsed.get(parse) }))
-          .filter(
-            (entry): entry is { parse: RankedParse; snapshot: LogSnapshot } => !!entry.snapshot,
-          )
-          .map(({ parse, snapshot }) => ({
-            key: `${parse.reportCode}:${parse.fightId}:${parse.name}`,
-            roles: rolesOf(parse),
-            description: describeParse(parse),
-            snapshot,
-            order: [selection.top, selection.sameBuild?.parse, selection.bestClose?.parse].includes(
-              parse,
-            )
-              ? 0
-              : parse.rank,
-          }))
-          .sort((a, b) => a.order - b.order)
-          .map(({ order: _order, ...log }) => log),
-      );
-      setStatus(
-        `Compared against ${rankings.length} ranked parses. Close = ilvl ±5, kill time ±20%, raid size ±5.`,
-      );
+      setParsed((previous) => new Map([...previous, ...fresh]));
+      setLoaded((previous) => (previous.includes(kind) ? previous : [...previous, kind]));
+      setStatus(null);
     } catch (err) {
-      setStatus(`Failed to load benchmarks: ${(err as Error).message}`);
+      setStatus(`Failed to load ${BENCHMARK_LABELS[kind]}: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
     }
   };
 
-  return { status, columns, logs, playerResults, load };
+  // Rankings and the #1 parse load as soon as the tab opens.
+  useEffect(() => {
+    if (!inputs || started.current) {
+      return;
+    }
+    started.current = true;
+    (async () => {
+      try {
+        setStatus('Fetching rankings…');
+        const rankings = await fetchRankings(inputs.query);
+        const next = selectBenchmarks(rankings, inputs.player);
+        setRankingCount(rankings.length);
+        setSelection(next);
+        await load('top', next);
+      } catch (err) {
+        setStatus(`Failed to fetch rankings: ${(err as Error).message}`);
+      }
+    })();
+    // load() is recreated each render; this runs once per mount on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputs]);
+
+  const derived = useMemo(() => {
+    if (!inputs || !selection || loaded.length === 0) {
+      return null;
+    }
+    const { profile, player } = inputs;
+    const snapshotsOf = (parses: RankedParse[]) =>
+      parses.map((p) => parsed.get(p)).filter((r): r is LogSnapshot => !!r);
+
+    const single = (title: string, parse: RankedParse | undefined, note = ''): BenchmarkColumn => {
+      const snapshot = parse && parsed.get(parse);
+      if (!parse || !snapshot) {
+        return {
+          title,
+          subtitle: parse ? `${describeParse(parse)} · failed to load` : 'none',
+          results: null,
+          snapshots: [],
+        };
+      }
+      const build = describeBuild(snapshot.build, player.talents);
+      return {
+        title,
+        subtitle: describeParse(parse) + note,
+        results: snapshot.results,
+        build: build.summary,
+        buildTooltip: build.tooltip,
+        comp: describeComp(snapshot.comp),
+        snapshots: [snapshot],
+      };
+    };
+    const median = (title: string, parses: RankedParse[], note = ''): BenchmarkColumn => {
+      const snapshots = snapshotsOf(parses);
+      return {
+        title,
+        subtitle: `${snapshots.length} logs${note}`,
+        results: medianResults(
+          profile,
+          snapshots.map((s) => s.results),
+        ),
+        build: describeHeroTrees(snapshots),
+        snapshots,
+      };
+    };
+    const closeCount = selection.top10Close.filter((c) => c.withinBounds).length;
+    const build: Record<BenchmarkKind, () => BenchmarkColumn> = {
+      top: () => single(BENCHMARK_LABELS.top, selection.top),
+      top10: () => median(BENCHMARK_LABELS.top10, selection.top10),
+      sameBuild: () =>
+        single(
+          BENCHMARK_LABELS.sameBuild,
+          selection.sameBuild?.parse,
+          selection.sameBuild && selection.sameBuild.similarity < SAME_BUILD_THRESHOLD
+            ? ' (closest build)'
+            : '',
+        ),
+      bestClose: () =>
+        single(
+          BENCHMARK_LABELS.bestClose,
+          selection.bestClose?.parse,
+          selection.bestClose?.withinBounds ? '' : ' (nearest, outside bounds)',
+        ),
+      top10Close: () =>
+        median(
+          BENCHMARK_LABELS.top10Close,
+          selection.top10Close.map((c) => c.parse),
+          `, ${closeCount} within bounds`,
+        ),
+    };
+
+    // The reference everything is scored against: the top-10 median if loaded, else #1.
+    const referenceLogs = loaded.includes('top10')
+      ? snapshotsOf(selection.top10)
+      : snapshotsOf(selection.top ? [selection.top] : []);
+    const reference: BenchmarkReference = {
+      label: loaded.includes('top10') ? 'the top-10 median' : 'the #1 parse',
+      logs: referenceLogs,
+    };
+    const referenceResults = medianResults(
+      profile,
+      referenceLogs.map((s) => s.results),
+    );
+    const rescore = (column: BenchmarkColumn): BenchmarkColumn => ({
+      ...column,
+      results: column.results && rescoreAgainst(column.results, referenceResults),
+    });
+    const columns = BENCHMARK_KINDS.filter((kind) => loaded.includes(kind)).map((kind) =>
+      rescore(build[kind]()),
+    );
+
+    // Individual logs for the window timelines, the single-parse benchmarks first.
+    const closeParses = selection.top10Close.map((c) => c.parse);
+    const rolesOf = (parse: RankedParse) =>
+      [
+        parse === selection.top && '#1',
+        parse === selection.sameBuild?.parse && 'Same build',
+        parse === selection.bestClose?.parse && 'Best close',
+        selection.top10.includes(parse) && `Top 10 #${parse.rank}`,
+        closeParses.includes(parse) && 'Close',
+      ].filter((role): role is string => !!role);
+    const headline = [selection.top, selection.sameBuild?.parse, selection.bestClose?.parse];
+    const logs: BenchmarkLog[] = [...parsed.entries()]
+      .filter((entry): entry is [RankedParse, LogSnapshot] => !!entry[1])
+      .sort(([a], [b]) => (headline.includes(a) ? 0 : a.rank) - (headline.includes(b) ? 0 : b.rank))
+      .map(([parse, snapshot]) => ({
+        key: `${parse.reportCode}:${parse.fightId}:${parse.name}`,
+        roles: rolesOf(parse),
+        description: describeParse(parse),
+        snapshot,
+      }));
+
+    return {
+      columns,
+      logs,
+      reference,
+      playerResults: rescoreAgainst(inputs.playerResults, referenceResults),
+    };
+  }, [inputs, selection, parsed, loaded]);
+
+  return {
+    status,
+    busy,
+    load,
+    loaded,
+    /** Benchmarks that can still be loaded. */
+    available: selection
+      ? BENCHMARK_KINDS.filter(
+          (kind) => !loaded.includes(kind) && parsesFor(selection, kind).length > 0,
+        )
+      : [],
+    rankingCount,
+    columns: derived?.columns ?? null,
+    logs: derived?.logs ?? [],
+    reference: derived?.reference ?? null,
+    playerResults: derived?.playerResults ?? null,
+  };
 }

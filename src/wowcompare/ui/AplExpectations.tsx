@@ -98,9 +98,9 @@ export default function AplExpectations({
             <th>Expectation</th>
             <th>APL says</th>
             <th>You</th>
-            <th>Top 10 median</th>
-            <th>Top 10 range</th>
-            <th>Top 10 at ≥{FOLLOWED * 100}%</th>
+            <th>Top median</th>
+            <th>Top range</th>
+            <th>Top logs at ≥{FOLLOWED * 100}%</th>
             <th>Verdict</th>
           </tr>
         </thead>

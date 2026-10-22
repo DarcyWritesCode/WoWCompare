@@ -24,7 +24,7 @@ export default function Suggestions({
 }: {
   profile: Profile;
   player: LogSnapshot;
-  /** The top-10 logs: what "top parses keep it up" is measured on. */
+  /** The reference logs (top 10, else #1): what "top parses keep it up" is measured on. */
   topLogs: LogSnapshot[];
   /** Every parsed log including the player's: the sample for DPS correlations. */
   allLogs: LogSnapshot[];
@@ -70,8 +70,8 @@ export default function Suggestions({
   return (
     <>
       <p className="text-muted">
-        Worked out from {allLogs.length} parsed logs ({topLogs.length} top-10). Accepted suggestions
-        are saved in this browser and apply from the next page load.
+        Worked out from {allLogs.length} parsed logs ({topLogs.length} as the reference). Accepted
+        suggestions are saved in this browser and apply from the next page load.
         {saved && (
           <>
             {' '}

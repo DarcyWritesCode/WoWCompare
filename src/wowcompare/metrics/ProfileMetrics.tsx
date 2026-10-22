@@ -169,8 +169,8 @@ class ProfileMetrics extends Analyzer {
       return;
     }
     return {
-      title: 'Profile',
-      url: 'profile',
+      title: 'Live Compare',
+      url: 'live-compare',
       render: () => (
         <Panel title={this.profile!.name}>
           <ProfileView

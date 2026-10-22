@@ -15,7 +15,7 @@ const appRoutes = createRoutesFromElements(
     <Route path="character/:region/:realm/:name" lazy={() => import('./routes/character')} />
     <Route path="guild/:region/:realm/:name" lazy={() => import('./routes/guild')} />
     <Route path="report/:reportCode/:fightId?/:player?/:build?" lazy={() => import('./report')}>
-      <Route index lazy={() => import('./routes/report/overview')} />
+      <Route index lazy={() => import('./routes/report/landing')} />
       <Route path="overview" lazy={() => import('./routes/report/overview')} />
       <Route path="statistics" lazy={() => import('./routes/report/statistics')} />
       <Route path="timeline" lazy={() => import('./routes/report/timeline')} />

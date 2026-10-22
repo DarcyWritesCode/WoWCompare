@@ -80,14 +80,18 @@ function StatCell({
 export default function CooldownDamage({
   player,
   columns,
+  topLogs,
+  referenceLabel,
 }: {
   player: LogSnapshot;
   columns: BenchmarkColumn[];
+  /** The reference logs (top 10, else #1) the player is flagged against. */
+  topLogs: LogSnapshot[];
+  referenceLabel: string;
 }) {
   const shown = COLUMN_TITLES.map((title) => columns.find((c) => c.title === title)).filter(
     (c): c is BenchmarkColumn => c !== undefined && c.snapshots.length > 0,
   );
-  const topLogs = columns.find((c) => c.title === 'Top 10 median')?.snapshots ?? [];
 
   return (
     <>
@@ -163,7 +167,7 @@ export default function CooldownDamage({
       <p className="text-muted">
         Casts per window × average damage per cast; damage that isn't cast directly (melee, procs,
         Convoke) is shown per window. Damage includes ticks and pets, so per-cast figures for DoTs
-        and summons run high. Orange: below 90% of the top-10 median.
+        and summons run high. Orange: below 90% of {referenceLabel}.
       </p>
     </>
   );

@@ -107,11 +107,11 @@ const SupportCheckerIssue = ({
                 {/* oxlint-disable-next-line wowanalyzer/no-br -- matches the layout above */}
                 <br />
                 <Link
-                  to={makeAnalyzerUrl(report, fight.id, player.id, 'profile', build)}
+                  to={makeAnalyzerUrl(report, fight.id, player.id, 'live-compare', build)}
                   onClick={onContinueAnyway}
                   style={{ fontSize: '1.2em' }}
                 >
-                  <Icon icon="inv_misc_book_09" /> Go to the Profile tab (built from SimC's current
+                  <Icon icon="inv_misc_book_09" /> Go to Live Compare (built from SimC's current
                   APL, so it stays up to date)
                 </Link>
               </>

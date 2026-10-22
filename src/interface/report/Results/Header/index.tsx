@@ -20,6 +20,7 @@ import type CharacterProfile from 'parser/core/CharacterProfile';
 import type Fight from 'parser/core/Fight';
 import { type PlayerDetails } from 'parser/core/Player';
 import { ComponentType, JSX, useMemo } from 'react';
+import TABS from 'interface/report/Results/TABS';
 import { Link, useNavigate } from 'react-router-dom';
 import HeaderBackground from './HeaderBackground';
 import { currentExpansion } from 'game/GameBranch';
@@ -146,12 +147,20 @@ export default function Header({
   const tabList = useMemo(
     () =>
       [
+        // WoWCompare: Live Compare goes first.
+        ...tabs
+          .filter((tab) => tab.url === TABS.LIVE_COMPARE)
+          .map((tab) => ({ ...tab, icon: OtherIcon })),
         ...standardTabs.before,
-        ...tabs.map((tab) => ({ ...tab, icon: OtherIcon })),
+        ...tabs
+          .filter((tab) => tab.url !== TABS.LIVE_COMPARE)
+          .map((tab) => ({ ...tab, icon: OtherIcon })),
         ...standardTabs.after,
       ] as InternalTab[],
     [tabs],
   );
+  // The landing route falls back to Overview for specs without Live Compare.
+  const activeTab = tabList.some((tab) => tab.url === selectedTab) ? selectedTab : TABS.OVERVIEW;
   const navigate = useNavigate();
   const [selectedPull] = useSelectedPull(fight);
 
@@ -186,7 +195,7 @@ export default function Header({
                       <TabButton
                         key={tab.url}
                         to={makeTabUrl(tab.url)}
-                        className={selectedTab === tab.url ? styles.active : ''}
+                        className={activeTab === tab.url ? styles.active : ''}
                       >
                         <Icon />
                         {isMessageDescriptor(tab.title) ? i18n._(tab.title) : tab.title}
@@ -195,7 +204,7 @@ export default function Header({
                 </TabStrip>
                 <TabSelect
                   onChange={(event) => navigate(makeTabUrl(event.target.value))}
-                  value={selectedTab}
+                  value={activeTab}
                 >
                   {tabList
                     .filter((tab: InternalTab) => !tab.hidden || tab.url === selectedTab)

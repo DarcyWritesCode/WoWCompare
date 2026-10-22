@@ -7,5 +7,6 @@ export default (pathname: string) => {
   if (match && match.params.resultTab) {
     return match.params.resultTab;
   }
-  return TABS.OVERVIEW;
+  // No tab in the URL: the landing route shows Live Compare when available (else Overview).
+  return TABS.LIVE_COMPARE;
 };
