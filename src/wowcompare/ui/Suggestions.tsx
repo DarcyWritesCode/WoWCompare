@@ -167,9 +167,13 @@ export default function Suggestions({
                 <td>{rank.suggestedRank}</td>
                 <td>{rank.entry.rank}</td>
                 <td>
-                  <SpellLink spell={player.results.entries[rank.index]?.spellId ?? 0}>
-                    {rank.entry.label}
-                  </SpellLink>
+                  {player.results.entries[rank.index]?.spellId ? (
+                    <SpellLink spell={player.results.entries[rank.index].spellId}>
+                      {rank.entry.label}
+                    </SpellLink>
+                  ) : (
+                    (player.results.entries[rank.index]?.label ?? rank.entry.token)
+                  )}
                 </td>
                 <td>{rank.metric ? METRIC_LABELS[rank.metric] : '—'}</td>
                 <td style={{ opacity: rank.r !== null && Math.abs(rank.r) >= 0.3 ? 1 : 0.5 }}>

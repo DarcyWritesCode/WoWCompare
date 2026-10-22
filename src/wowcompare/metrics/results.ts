@@ -84,7 +84,7 @@ export function scoreProfile(
         spellId: raw?.spellId ?? entry.spellIds[0] ?? 0,
         kind: entry.kind,
         rank: entry.rank,
-        label: entry.label,
+        label: entry.label ?? tokenLabel(entry),
         applicable: raw?.applicable ?? false,
         metrics,
       };
@@ -181,4 +181,14 @@ export interface LogSnapshot {
   comp: RaidComp;
   windows: CooldownWindowSet[];
   fightDps: number;
+}
+
+/**
+ * Fallback display name for entries no spell was found for (SimC-only tokens such as a
+ * pseudo-buff): the token in title case. Undefined when a spell is known, so links show its name.
+ */
+export function tokenLabel(entry: { token: string; spellIds: number[] }): string | undefined {
+  return entry.spellIds.length > 0
+    ? undefined
+    : entry.token.replace(/_/g, ' ').replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }

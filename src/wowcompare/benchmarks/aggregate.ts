@@ -1,5 +1,5 @@
 import { MetricKind, Profile } from '../profile/types';
-import { ProfileResults, ScoredEntry, ScoredRule, statusFor } from '../metrics/results';
+import { ProfileResults, ScoredEntry, ScoredRule, statusFor, tokenLabel } from '../metrics/results';
 
 export function median(values: number[]): number | null {
   if (values.length === 0) {
@@ -40,7 +40,7 @@ export function medianResults(profile: Profile, results: ProfileResults[]): Prof
         spellId: matching[0]?.spellId ?? entry.spellIds[0] ?? 0,
         kind: entry.kind,
         rank: entry.rank,
-        label: entry.label,
+        label: entry.label ?? tokenLabel(entry),
         applicable: matching.length > 0,
         metrics,
       };

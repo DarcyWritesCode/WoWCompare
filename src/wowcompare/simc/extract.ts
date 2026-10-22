@@ -171,7 +171,11 @@ export function summarizeApl(text: string): AplSummary {
     .map((token) => ({
       token,
       order: firstIndex(token),
-      requires: requiredAuras(token).filter((req) => !IGNORED_TOKENS.has(req.token)),
+      // A cast's own aura (`breath_of_sindragosa,if=!buff.breath_of_sindragosa.up`) is just a
+      // toggle guard, not a rule worth grading.
+      requires: requiredAuras(token).filter(
+        (req) => !IGNORED_TOKENS.has(req.token) && req.token !== token,
+      ),
     }))
     .filter((rule) => rule.requires.length > 0)
     .map((rule) => ({ ...rule, strict: true }));

@@ -38,12 +38,15 @@ export function describeComp(comp: RaidComp) {
   return `${comp.tank}T ${comp.healer}H ${comp.dps}D`;
 }
 
-/** Hero tree mix across the logs behind a median column, e.g. "9 Wildstalker · 1 Druid of the Claw". */
+/** Hero tree mix across the logs behind a median column, e.g. "9 Wildstalker · 1 Druid of the Claw"; empty when unknown. */
 export function describeHeroTrees(snapshots: LogSnapshot[]) {
+  // Hero trees are only known for specs with hand-written keystones; say nothing otherwise.
   const counts = new Map<string, number>();
   snapshots.forEach((snapshot) => {
-    const tree = snapshot.build.heroTree ?? 'Unknown';
-    counts.set(tree, (counts.get(tree) ?? 0) + 1);
+    const tree = snapshot.build.heroTree;
+    if (tree) {
+      counts.set(tree, (counts.get(tree) ?? 0) + 1);
+    }
   });
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
