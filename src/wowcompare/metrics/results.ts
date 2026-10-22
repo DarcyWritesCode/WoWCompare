@@ -172,8 +172,20 @@ export interface AuraUsage {
   uptime: number;
 }
 
+/** An ability's damage over the whole fight, grouped by name across spell IDs. */
+export interface AbilityTotal {
+  token: string;
+  name: string;
+  spellIds: number[];
+  casts: number;
+  damage: number;
+}
+
 /** Everything a parsed log contributes to the comparison. */
 export interface LogSnapshot {
+  durationMs: number;
+  /** Damage and casts per ability over the whole fight. */
+  abilities: AbilityTotal[];
   /** Every self-applied buff and player debuff, for suggesting entries the profile lacks. */
   auras: AuraUsage[];
   results: ProfileResults;

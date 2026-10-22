@@ -3,6 +3,7 @@ import { LogSnapshot } from '../metrics/results';
 import { Profile } from '../profile/types';
 import AplExpectations from './AplExpectations';
 import BenchmarkTable from './BenchmarkTable';
+import BiggestMistakes from './BiggestMistakes';
 import CooldownDamage from './CooldownDamage';
 import ProfileResultsTable from './ProfileResultsTable';
 import Suggestions from './Suggestions';
@@ -51,6 +52,12 @@ export default function ProfileView({
 
       {benchmarkInputs && (
         <>
+          {columns && (
+            <>
+              <h2>Biggest mistakes</h2>
+              <BiggestMistakes profile={profile} player={snapshot} topLogs={topLogs} />
+            </>
+          )}
           <h2>Benchmarks</h2>
           {columns ? (
             <BenchmarkTable player={{ ...snapshot, results }} benchmarks={columns} />

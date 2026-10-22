@@ -13,7 +13,7 @@ import Enemies from 'parser/shared/modules/Enemies';
 
 import { simcToken } from '../simc/resolve';
 import { mergeIntervals, totalDuration } from './intervals';
-import { AuraUsage, LogSnapshot, ProfileResults, scoreProfile } from './results';
+import { AbilityTotal, AuraUsage, LogSnapshot, ProfileResults, scoreProfile } from './results';
 
 /** Combines the metric modules into one scored, serializable result for the selected profile. */
 class ProfileMetrics extends Analyzer {
@@ -77,6 +77,25 @@ class ProfileMetrics extends Analyzer {
     };
   }
 
+  /** Damage and casts per ability over the fight, grouped by in-game name. */
+  private abilityTotals(): AbilityTotal[] {
+    const { damage, casts, names } = this.damageTimeline;
+    const byToken = new Map<string, AbilityTotal>();
+    const get = (spellId: number) => {
+      const name = names.get(spellId) ?? `Spell ${spellId}`;
+      const token = simcToken(name);
+      const total = byToken.get(token) ?? { token, name, spellIds: [], casts: 0, damage: 0 };
+      if (!total.spellIds.includes(spellId)) {
+        total.spellIds.push(spellId);
+      }
+      byToken.set(token, total);
+      return total;
+    };
+    damage.forEach((hit) => (get(hit.spellId).damage += hit.amount));
+    casts.forEach((cast) => (get(cast.spellId).casts += 1));
+    return [...byToken.values()].filter((total) => total.damage > 0 || total.casts > 0);
+  }
+
   /** Uptime of every buff the player gave themselves and every debuff they applied, by name. */
   private auraUsage(): AuraUsage[] {
     const start = this.owner.fight.start_time;
@@ -134,6 +153,8 @@ class ProfileMetrics extends Analyzer {
     this.owner.playerDetails.forEach((player) => (comp[player.role] += 1));
     return {
       results,
+      durationMs,
+      abilities: this.abilityTotals(),
       auras: this.auraUsage(),
       build: { talents, heroTree },
       comp,
