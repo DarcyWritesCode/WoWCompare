@@ -1,6 +1,6 @@
 import Spell from 'common/SPELLS/Spell';
 
-import { HeroTree } from '../../profile/types';
+import { HeroTree, ProfileEntry } from '../../profile/types';
 import { AliasTable } from '../resolve';
 
 /** What it takes to build a profile for one spec from its SimC APL. */
@@ -19,6 +19,11 @@ export interface SpecAdapter {
   /** Cooldowns without a buff: window length after each cast, by SimC token. */
   windowMs?: Record<string, number>;
   heroTrees?: HeroTree[];
+  /**
+   * Entries the APL never checks but that matter, e.g. Balance's Starlord (SimC models it
+   * internally, so the APL has no reason to mention it). Appended after the APL's own entries.
+   */
+  extraEntries?: Omit<ProfileEntry, 'rank'>[];
 }
 
 /** Per-spec fixes layered over the generic adapter. */

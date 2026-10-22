@@ -10,6 +10,16 @@ export const druidBalance: SpecOverrides = {
       action: [SPELLS_DRUID.CELESTIAL_ALIGNMENT.id, SPELLS_DRUID.INCARNATION_CHOSEN_OF_ELUNE.id],
     },
   },
+  extraEntries: [
+    {
+      // Stacked by spenders; keeping it rolling is a core Balance skill the APL never states.
+      token: 'starlord',
+      spellIds: [SPELLS_DRUID.STARLORD.id],
+      kind: 'buff',
+      metrics: ['uptime'],
+      requires: { token: '', spellIds: [TALENTS_DRUID.STARLORD_TALENT.id] },
+    },
+  ],
 };
 
 /** Guardian: `bs_inc` is whichever of Berserk / Incarnation the player has. */

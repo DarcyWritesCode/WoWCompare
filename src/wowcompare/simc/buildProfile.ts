@@ -102,7 +102,9 @@ export function buildProfile(
       seen.add(key);
       return true;
     })
-    .map((candidate, i) => ({ ...candidate.entry, rank: i + 1 }));
+    .map((candidate) => candidate.entry)
+    .concat(adapter.extraEntries ?? [])
+    .map((entry, i) => ({ ...entry, rank: i + 1 }));
 
   const rules: CastRule[] = summary.rules.map((aplRule, i) => {
     const onCast = ref(aplRule.token, 'action');

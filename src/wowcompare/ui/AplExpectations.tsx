@@ -72,7 +72,7 @@ export default function AplExpectations({
           (e) => e?.metrics.procUsage === undefined,
         );
       const { metric, says } = isState
-        ? { metric: 'uptime' as const, says: 'Be in it (the APL waits for it)' }
+        ? { metric: 'uptime' as const, says: 'Keep up' }
         : ENTRY_EXPECTATIONS[entry.kind];
       return {
         key: `${entry.kind}-${entry.token}`,
