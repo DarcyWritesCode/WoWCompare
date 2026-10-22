@@ -35,8 +35,8 @@ export default function ProfileView({
 
       <h2>Cooldown windows</h2>
       <p className="text-muted">
-        DPS per second around each window (shaded); the dashed line is the fight average. Scroll
-        sideways through the windows.
+        DPS per second around each window (highlighted); the dashed line is the fight average.
+        Scroll sideways through the windows.
         {benchmarkInputs && !columns && ' Load benchmarks to compare with a benchmark log.'}
       </p>
       <WindowReels player={snapshot} benchmarks={logs} />
