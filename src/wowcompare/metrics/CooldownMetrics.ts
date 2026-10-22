@@ -1,5 +1,6 @@
 import Analyzer, { Options } from 'parser/core/Analyzer';
 import { UpdateSpellUsableEvent } from 'parser/core/Events';
+import RESOURCE_TYPES from 'game/RESOURCE_TYPES';
 import Abilities from 'parser/core/modules/Abilities';
 import SpellUsable from 'parser/shared/modules/SpellUsable';
 
@@ -8,7 +9,13 @@ import { Profile, ProfileEntry } from '../profile/types';
 import DamageTimeline from './DamageTimeline';
 import SpellCatalog from './SpellCatalog';
 import { contains, Interval, mergeIntervals, windowThroughput } from './intervals';
-import { CooldownWindow, CooldownWindowSet, RawEntryMetrics, WindowAbility } from './results';
+import {
+  CooldownWindow,
+  CooldownWindowSet,
+  RawEntryMetrics,
+  WindowAbility,
+  WindowEntryState,
+} from './results';
 import { simcToken } from '../simc/resolve';
 
 /** Context shown around each window in the timelines. */
@@ -19,6 +26,8 @@ const MIN_COOLDOWN_SECONDS = 20;
 /** Abilities below this share of a cooldown's window damage aren't listed. */
 const MIN_ABILITY_SHARE = 0.03;
 const MAX_ABILITIES = 8;
+/** How far a window's start may be from the cast that opened it. */
+const ENTRY_CAST_TOLERANCE_MS = 300;
 
 export interface CooldownUsage {
   casts: number;
@@ -154,9 +163,50 @@ class CooldownMetrics extends Analyzer {
           label: entry.label,
           windows: windows.map((window) => this.timeline(window)),
           abilities: this.abilityBreakdown(windows),
+          entryStates: windows.map((window) => this.entryState(window.start, resolved.casts)),
         },
       ];
     });
+  }
+
+  /**
+   * Resources and self-applied buffs as a window opens: what the player pooled and lined up.
+   * Buffs applied at the opening instant (the cooldown's own) don't count as lined up.
+   */
+  private entryState(start: number, castTimes: number[]): WindowEntryState {
+    const castAt = castTimes.find((t) => Math.abs(t - start) <= ENTRY_CAST_TOLERANCE_MS) ?? start;
+    const cast = this.damageTimeline.casts.find(
+      (c) => c.timestamp === castAt && c.resources !== undefined,
+    );
+    const resources: WindowEntryState['resources'] = {};
+    for (const { type, amount, max } of cast?.resources ?? []) {
+      const name = RESOURCE_TYPES[type]?.name;
+      if (name && max > 0) {
+        resources[name] = amount / max;
+      }
+    }
+    // Mana rarely matters for a cooldown; keep it only when it's the sole resource.
+    if (Object.keys(resources).length > 1) {
+      delete resources.Mana;
+    }
+
+    const buffs: WindowEntryState['buffs'] = {};
+    for (const buff of this.selectedCombatant.buffs) {
+      const active = buff.start < castAt && (buff.end ?? Infinity) > castAt;
+      if (!active || buff.sourceID !== this.owner.playerId) {
+        continue;
+      }
+      const stacks =
+        [...buff.stackHistory].reverse().find((h) => h.timestamp <= castAt)?.stacks ??
+        buff.stacks ??
+        1;
+      buffs[simcToken(buff.ability.name)] = {
+        name: buff.ability.name,
+        spellId: buff.ability.guid,
+        stacks: Math.max(1, stacks),
+      };
+    }
+    return { resources, buffs };
   }
 
   /** The biggest damage abilities inside the windows, grouped by name across spell IDs. */

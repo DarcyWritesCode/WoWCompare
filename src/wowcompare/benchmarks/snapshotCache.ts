@@ -5,7 +5,7 @@ import { Profile } from '../profile/types';
  * Bump whenever `LogSnapshot` or the metrics behind it change, so stale cached results from
  * older code are never used.
  */
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 
 /**
  * Server-side cache of parsed benchmark logs; entries expire after 24 hours on the server. Served

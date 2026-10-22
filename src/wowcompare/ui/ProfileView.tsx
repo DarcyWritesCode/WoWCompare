@@ -7,6 +7,7 @@ import AplExpectations from './AplExpectations';
 import BenchmarkTable from './BenchmarkTable';
 import BiggestMistakes from './BiggestMistakes';
 import CooldownDamage from './CooldownDamage';
+import CooldownEntry from './CooldownEntry';
 import ProfileResultsTable from './ProfileResultsTable';
 import Suggestions from './Suggestions';
 import useBenchmarks, { BenchmarkInputs, BenchmarkKind } from './useBenchmarks';
@@ -108,6 +109,14 @@ export default function ProfileView({
           <CooldownDamage
             player={snapshot}
             columns={columns}
+            topLogs={reference.logs}
+            referenceLabel={reference.label}
+          />
+
+          <h2>Going into cooldowns</h2>
+          <CooldownEntry
+            specId={profile.specId}
+            player={snapshot}
             topLogs={reference.logs}
             referenceLabel={reference.label}
           />

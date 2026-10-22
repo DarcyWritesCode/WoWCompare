@@ -139,6 +139,14 @@ export interface WindowAbility {
   damage: number;
 }
 
+/** The player's state as a cooldown starts: resources and the buffs they lined up. */
+export interface WindowEntryState {
+  /** Resource name → fraction of its maximum at the cast. */
+  resources: Record<string, number>;
+  /** Self-applied buffs already up, by name token. */
+  buffs: Record<string, { name: string; spellId: number; stacks: number }>;
+}
+
 export interface CooldownWindowSet {
   token: string;
   spellId: number;
@@ -147,6 +155,8 @@ export interface CooldownWindowSet {
   windows: CooldownWindow[];
   /** The biggest damage abilities inside the windows. */
   abilities: WindowAbility[];
+  /** State going into each window, in window order. */
+  entryStates: WindowEntryState[];
 }
 
 /** The talents behind a log, for showing how a benchmark's build differs. */
