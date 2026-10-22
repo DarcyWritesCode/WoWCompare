@@ -117,6 +117,7 @@ import BuffMetrics from 'wowcompare/metrics/BuffMetrics';
 import ConditionRules from 'wowcompare/metrics/ConditionRules';
 import CooldownMetrics from 'wowcompare/metrics/CooldownMetrics';
 import DamageTimeline from 'wowcompare/metrics/DamageTimeline';
+import SpellCatalog from 'wowcompare/metrics/SpellCatalog';
 import ProfileMetrics from 'wowcompare/metrics/ProfileMetrics';
 // This prints to console anything that the DI has to do
 const debugDependencyInjection = false;
@@ -247,6 +248,7 @@ class CombatLogParser {
 
     // WoWCompare: profile-driven metrics (inactive for specs without a profile)
     damageTimeline: DamageTimeline,
+    spellCatalog: SpellCatalog,
     buffMetrics: BuffMetrics,
     cooldownMetrics: CooldownMetrics,
     conditionRules: ConditionRules,

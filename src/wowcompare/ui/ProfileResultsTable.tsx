@@ -47,6 +47,7 @@ function MetricCell({ kind, metric }: { kind: MetricKind; metric?: ScoredMetric 
 
 /** One log's profile results: entries by rank, then cast rules. */
 export default function ProfileResultsTable({ results }: { results: ProfileResults }) {
+  const hidden = results.entries.filter((entry) => !entry.applicable).length;
   const usedMetrics = METRIC_ORDER.filter((kind) =>
     results.entries.some((entry) => entry.metrics[kind]),
   );
@@ -64,12 +65,11 @@ export default function ProfileResultsTable({ results }: { results: ProfileResul
           </tr>
         </thead>
         <tbody>
-          {[...results.entries]
-            // Untalented entries last; sort is stable, so rank order holds within each group.
-            .sort((a, b) => Number(b.applicable) - Number(a.applicable))
+          {results.entries
+            .filter((entry) => entry.applicable)
             .map((entry) => (
               <tr
-                key={`${entry.kind}-${entry.spellId}`}
+                key={`${entry.kind}-${entry.token}`}
                 style={{ opacity: entry.applicable ? 1 : 0.4 }}
               >
                 <td>{entry.rank}</td>
@@ -84,6 +84,13 @@ export default function ProfileResultsTable({ results }: { results: ProfileResul
             ))}
         </tbody>
       </table>
+
+      {hidden > 0 && (
+        <p className="text-muted">
+          {hidden} more APL {hidden === 1 ? 'entry' : 'entries'} not used in this log (not talented,
+          or not a real cooldown).
+        </p>
+      )}
 
       {results.rules.length > 0 && (
         <table className="table table-condensed">

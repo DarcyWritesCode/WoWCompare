@@ -1,60 +1,64 @@
-import Analyzer, { Options, SELECTED_PLAYER } from 'parser/core/Analyzer';
-import Events, { CastEvent } from 'parser/core/Events';
+import Analyzer, { Options } from 'parser/core/Analyzer';
 import Enemies from 'parser/shared/modules/Enemies';
 
 import { getProfile } from '../profile/registry';
 import { AuraCondition, CastRule } from '../profile/types';
+import DamageTimeline from './DamageTimeline';
 import { RawRuleResult } from './results';
+import SpellCatalog from './SpellCatalog';
 
 /** Tolerance for an aura that ended a moment before the cast (log ordering jitter). */
 const BUFFER_MS = 100;
 
-/** Checks the profile's cast rules ("cast X while Y is up") at every matching cast. */
+type Cast = DamageTimeline['casts'][number];
+
+/**
+ * Checks the profile's cast rules ("cast X while Y is up") at every matching cast. Evaluated after
+ * the fight, so the spells behind each rule can be matched to the ones this log actually used.
+ */
 class ConditionRules extends Analyzer {
   static dependencies = {
     enemies: Enemies,
+    damageTimeline: DamageTimeline,
+    spellCatalog: SpellCatalog,
   };
   protected enemies!: Enemies;
+  protected damageTimeline!: DamageTimeline;
+  protected spellCatalog!: SpellCatalog;
 
   private readonly rules: CastRule[];
-  private readonly counts = new Map<string, RawRuleResult>();
 
   constructor(options: Options) {
     super(options);
     const specId = this.selectedCombatant.spec?.id;
     this.rules = (specId === undefined ? undefined : getProfile(specId))?.rules ?? [];
     this.active = this.rules.length > 0;
-    this.rules.forEach((rule) =>
-      this.counts.set(rule.id, { ruleId: rule.id, casts: 0, passed: 0 }),
-    );
-    this.addEventListener(Events.cast.by(SELECTED_PLAYER), this.onCast);
   }
 
-  private holds(condition: AuraCondition, event: CastEvent) {
-    const entity =
-      condition.on === 'player' ? this.selectedCombatant : this.enemies.getEntity(event);
-    const sourceID = condition.on === 'player' ? null : this.owner.playerId;
-    const up = condition.auraIds.some(
-      (auraId) => entity?.hasBuff(auraId, event.timestamp, BUFFER_MS, 0, sourceID) ?? false,
+  private holds(condition: AuraCondition, cast: Cast) {
+    const onPlayer = condition.on === 'player';
+    const entity = onPlayer
+      ? this.selectedCombatant
+      : cast.targetID === undefined
+        ? null
+        : this.enemies.getById(cast.targetID, cast.targetInstance);
+    const sourceID = onPlayer ? null : this.owner.playerId;
+    const auraIds = this.spellCatalog.resolve(onPlayer ? 'buff' : 'debuff', condition.aura);
+    const up = auraIds.some(
+      (auraId) => entity?.hasBuff(auraId, cast.timestamp, BUFFER_MS, 0, sourceID) ?? false,
     );
     return up === condition.present;
   }
 
-  private onCast(event: CastEvent) {
-    for (const rule of this.rules) {
-      if (!rule.onCast.includes(event.ability.guid)) {
-        continue;
-      }
-      const count = this.counts.get(rule.id)!;
-      count.casts += 1;
-      if (rule.require.every((condition) => this.holds(condition, event))) {
-        count.passed += 1;
-      }
-    }
-  }
-
   results(): RawRuleResult[] {
-    return [...this.counts.values()];
+    return this.rules.map((rule) => {
+      const castIds = new Set(this.spellCatalog.resolve('cast', rule.onCast));
+      const casts = this.damageTimeline.casts.filter((c) => castIds.has(c.spellId));
+      const passed = casts.filter((cast) =>
+        rule.require.every((condition) => this.holds(condition, cast)),
+      ).length;
+      return { ruleId: rule.id, casts: casts.length, passed };
+    });
   }
 }
 

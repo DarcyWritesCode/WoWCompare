@@ -228,10 +228,10 @@ export default function WindowReels({
         </div>
       )}
       {player.windows.map((set) => {
-        const benchSet = benchmark?.snapshot.windows.find((s) => s.spellId === set.spellId);
+        const benchSet = benchmark?.snapshot.windows.find((s) => s.token === set.token);
         const maxDps = Math.max(1, peak(set), peak(benchSet));
         return (
-          <div key={set.spellId} style={{ marginBottom: 20 }}>
+          <div key={set.token} style={{ marginBottom: 20 }}>
             <h3>
               <SpellLink spell={set.spellId}>{set.label}</SpellLink>
             </h3>

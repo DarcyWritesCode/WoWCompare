@@ -65,12 +65,21 @@ export default function AplExpectations({
         .map((r) => r.value!),
     })),
     ...player.entries.map((entry, i) => {
-      const { metric, says } = ENTRY_EXPECTATIONS[entry.kind];
+      // Buffs that turned out to be states (e.g. Eclipse) are measured by uptime, not proc usage.
+      const isState =
+        entry.kind === 'buff' &&
+        [entry, ...topLogs.map((log) => log.results.entries[i])].every(
+          (e) => e?.metrics.procUsage === undefined,
+        );
+      const { metric, says } = isState
+        ? { metric: 'uptime' as const, says: 'Be in it (the APL waits for it)' }
+        : ENTRY_EXPECTATIONS[entry.kind];
       return {
-        key: `${entry.kind}-${entry.spellId}`,
+        key: `${entry.kind}-${entry.token}`,
         label: <SpellLink spell={entry.spellId}>{entry.label}</SpellLink>,
         says,
-        soft: false,
+        // A state has no "right" uptime; it's context, not pass/fail.
+        soft: isState,
         you: entry.applicable ? (entry.metrics[metric]?.value ?? null) : null,
         top: topLogs
           .map((log) => log.results.entries[i])

@@ -7,7 +7,12 @@ import Events, { CastEvent, DamageEvent } from 'parser/core/Events';
  */
 class DamageTimeline extends Analyzer {
   readonly damage: { timestamp: number; amount: number }[] = [];
-  readonly casts: { timestamp: number; spellId: number }[] = [];
+  readonly casts: {
+    timestamp: number;
+    spellId: number;
+    targetID?: number;
+    targetInstance?: number;
+  }[] = [];
 
   constructor(options: Options) {
     super(options);
@@ -16,7 +21,12 @@ class DamageTimeline extends Analyzer {
   }
 
   private onCast(event: CastEvent) {
-    this.casts.push({ timestamp: event.timestamp, spellId: event.ability.guid });
+    this.casts.push({
+      timestamp: event.timestamp,
+      spellId: event.ability.guid,
+      targetID: event.targetID,
+      targetInstance: event.targetInstance,
+    });
   }
 
   private onDamage(event: DamageEvent) {

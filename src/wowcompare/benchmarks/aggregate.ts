@@ -18,13 +18,16 @@ export function medianResults(profile: Profile, results: ProfileResults[]): Prof
   const entries = profile.entries
     .map((entry): ScoredEntry => {
       const matching = results
-        .map((r) => r.entries.find((e) => e.spellId === entry.spellId && e.kind === entry.kind))
+        .map((r) => r.entries.find((e) => e.token === entry.token && e.kind === entry.kind))
         .filter((e): e is ScoredEntry => e !== undefined && e.applicable);
       const metrics: ScoredEntry['metrics'] = {};
       for (const kind of entry.metrics as MetricKind[]) {
         const values = matching
           .map((e) => e.metrics[kind]?.value)
           .filter((v): v is number => typeof v === 'number');
+        if (values.length === 0) {
+          continue;
+        }
         const value = median(values);
         metrics[kind] = {
           value,
@@ -33,7 +36,8 @@ export function medianResults(profile: Profile, results: ProfileResults[]): Prof
         };
       }
       return {
-        spellId: entry.spellId,
+        token: entry.token,
+        spellId: matching[0]?.spellId ?? entry.spellIds[0] ?? 0,
         kind: entry.kind,
         rank: entry.rank,
         label: entry.label,

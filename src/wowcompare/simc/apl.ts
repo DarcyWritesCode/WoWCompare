@@ -123,14 +123,12 @@ export function references(expr: string | undefined, prefix: string): string[] {
   return [...expr.matchAll(pattern)].map((m) => m[1]);
 }
 
-/** Positive checks of a buff anywhere in an expression (`buff.x.up`/`react`, not negated). */
+/** Positive checks of a buff anywhere in an expression (`buff.x.up`/`react`, not negated; stack counts aren't procs). */
 export function positiveBuffChecks(expr: string | undefined): string[] {
   if (!expr) {
     return [];
   }
-  return [...expr.matchAll(/(^|[^!a-z0-9_.])buff\.([a-z0-9_]+)\.(up|react|stack)/g)].map(
-    (m) => m[2],
-  );
+  return [...expr.matchAll(/(^|[^!a-z0-9_.])buff\.([a-z0-9_]+)\.(up|react)\b/g)].map((m) => m[2]);
 }
 
 /**

@@ -1,17 +1,20 @@
-import Analyzer, { Options, SELECTED_PLAYER } from 'parser/core/Analyzer';
-import Events, { CastEvent, UpdateSpellUsableEvent } from 'parser/core/Events';
+import Analyzer, { Options } from 'parser/core/Analyzer';
+import { UpdateSpellUsableEvent } from 'parser/core/Events';
 import Abilities from 'parser/core/modules/Abilities';
 import SpellUsable from 'parser/shared/modules/SpellUsable';
 
 import { getProfile } from '../profile/registry';
 import { Profile, ProfileEntry } from '../profile/types';
 import DamageTimeline from './DamageTimeline';
+import SpellCatalog from './SpellCatalog';
 import { Interval, mergeIntervals, windowThroughput } from './intervals';
 import { CooldownWindow, CooldownWindowSet, RawEntryMetrics } from './results';
 
 /** Context shown around each window in the timelines. */
 const WINDOW_PADDING_MS = 3_000;
 const BUCKET_MS = 1_000;
+/** Shorter cooldowns are rotational (e.g. a 6s builder), not something to grade as a cooldown. */
+const MIN_COOLDOWN_SECONDS = 20;
 
 export interface CooldownUsage {
   casts: number;
@@ -60,63 +63,96 @@ class CooldownMetrics extends Analyzer {
     spellUsable: SpellUsable,
     abilities: Abilities,
     damageTimeline: DamageTimeline,
+    spellCatalog: SpellCatalog,
   };
   protected spellUsable!: SpellUsable;
   protected abilities!: Abilities;
   protected damageTimeline!: DamageTimeline;
+  protected spellCatalog!: SpellCatalog;
 
   private readonly profile: Profile | undefined;
-  private readonly casts = new Map<number, number[]>();
 
   constructor(options: Options) {
     super(options);
     const specId = this.selectedCombatant.spec?.id;
     this.profile = specId === undefined ? undefined : getProfile(specId);
     this.active = this.entries.length > 0;
-    this.entries.forEach((e) => this.casts.set(e.spellId, []));
-    this.addEventListener(Events.cast.by(SELECTED_PLAYER), this.onCast);
   }
 
   private get entries(): ProfileEntry[] {
     return this.profile?.entries.filter((e) => e.kind === 'cooldown') ?? [];
   }
 
-  private onCast(event: CastEvent) {
-    this.casts.get(event.ability.guid)?.push(event.timestamp);
+  private castTimes(spellId: number): number[] {
+    return this.damageTimeline.casts.filter((c) => c.spellId === spellId).map((c) => c.timestamp);
+  }
+
+  /**
+   * The spell this log uses for the entry: the matching spell cast most often, else one the
+   * player has in their spellbook. Undefined when the player doesn't have it.
+   */
+  private resolve(entry: ProfileEntry): { spellId: number; casts: number[] } | undefined {
+    const candidates = this.spellCatalog.resolve('cast', entry);
+    const best = candidates
+      .map((spellId) => ({ spellId, casts: this.castTimes(spellId) }))
+      .sort((a, b) => b.casts.length - a.casts.length)[0];
+    if (best && best.casts.length > 0) {
+      return best;
+    }
+    const known = candidates.find((id) => this.abilities.getAbility(id) !== undefined);
+    return known === undefined ? undefined : { spellId: known, casts: [] };
+  }
+
+  /** Real cooldowns only: spells with no or a short cooldown aren't graded as cooldowns. */
+  private isCooldown(spellId: number): boolean {
+    const cooldown = this.abilities.getAbility(spellId)?.cooldown;
+    const fromLog = this.spellUsable
+      .history(spellId)
+      .data.find((u) => u.expectedRechargeDuration > 0)?.expectedRechargeDuration;
+    const seconds = cooldown ?? (fromLog ? fromLog / 1000 : undefined);
+    return seconds === undefined || seconds >= MIN_COOLDOWN_SECONDS;
   }
 
   /** The cooldown's active windows: its buff if it has one, else a fixed span after each cast. */
-  windows(entry: ProfileEntry): Interval[] {
+  windows(entry: ProfileEntry, spellId: number, casts: number[]): Interval[] {
+    const start = this.owner.fight.start_time;
     const end = this.owner.fight.end_time;
-    const buffId = entry.windowBuffId ?? entry.spellId;
-    const buffWindows = this.selectedCombatant
-      .getBuffHistory(buffId)
-      .map((buff) => ({ start: buff.start, end: buff.end ?? end }));
+    const buffIds = this.spellCatalog.resolve('buff', { token: entry.token, spellIds: [spellId] });
+    const buffWindows = buffIds.flatMap((id) =>
+      this.selectedCombatant
+        .getBuffHistory(id)
+        .map((buff) => ({ start: buff.start, end: buff.end ?? end })),
+    );
     if (buffWindows.length > 0 || !entry.windowMs) {
-      return mergeIntervals(buffWindows, this.owner.fight.start_time, end);
+      return mergeIntervals(buffWindows, start, end);
     }
     const windowMs = entry.windowMs;
     return mergeIntervals(
-      (this.casts.get(entry.spellId) ?? []).map((t) => ({ start: t, end: t + windowMs })),
-      this.owner.fight.start_time,
+      casts.map((t) => ({ start: t, end: t + windowMs })),
+      start,
       end,
     );
   }
 
-  /** Each applicable cooldown's windows as plain data, for the window timelines. */
+  /** Each graded cooldown's windows as plain data, for the window timelines. */
   windowTimelines(): CooldownWindowSet[] {
-    return this.entries
-      .filter(
-        (entry) =>
-          this.abilities.getAbility(entry.spellId) !== undefined ||
-          (this.casts.get(entry.spellId)?.length ?? 0) > 0,
-      )
-      .map((entry) => ({
-        spellId: entry.spellId,
-        rank: entry.rank,
-        label: entry.label,
-        windows: this.windows(entry).map((window) => this.timeline(window)),
-      }));
+    return this.entries.flatMap((entry) => {
+      const resolved = this.resolve(entry);
+      if (!resolved || !this.isCooldown(resolved.spellId)) {
+        return [];
+      }
+      return [
+        {
+          token: entry.token,
+          spellId: resolved.spellId,
+          rank: entry.rank,
+          label: entry.label,
+          windows: this.windows(entry, resolved.spellId, resolved.casts).map((window) =>
+            this.timeline(window),
+          ),
+        },
+      ];
+    });
   }
 
   private timeline(window: Interval): CooldownWindow {
@@ -161,20 +197,17 @@ class CooldownMetrics extends Analyzer {
 
     return this.entries.map((entry) => {
       const metrics: RawEntryMetrics['metrics'] = {};
-      // Abilities only lists spells the player has (talents, hero tree), but a spec's ability
-      // list can miss spells or use other IDs, so a spell that was actually cast also counts.
-      const applicable =
-        this.abilities.getAbility(entry.spellId) !== undefined ||
-        (this.casts.get(entry.spellId)?.length ?? 0) > 0;
-      if (!applicable) {
-        return { spellId: entry.spellId, kind: entry.kind, applicable, metrics };
+      const resolved = this.resolve(entry);
+      const spellId = resolved?.spellId ?? entry.spellIds[0] ?? 0;
+      const base = { token: entry.token, spellId, kind: entry.kind };
+      if (!resolved || !this.isCooldown(resolved.spellId)) {
+        return { ...base, applicable: false, metrics };
       }
 
       if (entry.metrics.includes('cooldownUsage')) {
-        const casts = this.casts.get(entry.spellId)?.length ?? 0;
         const usage = cooldownUsage(
-          casts,
-          this.spellUsable.history(entry.spellId).data,
+          resolved.casts.length,
+          this.spellUsable.history(spellId).data,
           fightStart,
           fightEnd,
         );
@@ -185,15 +218,19 @@ class CooldownMetrics extends Analyzer {
         };
       }
       if (entry.metrics.includes('windowDps')) {
+        const windows = this.windows(entry, spellId, resolved.casts);
         const throughput = windowThroughput(
           this.damageTimeline.damage,
-          this.windows(entry),
+          windows,
           fightStart,
           fightEnd,
         );
-        metrics.windowDps = { value: throughput.ratio, detail: { ...throughput } };
+        metrics.windowDps = {
+          value: windows.length > 0 ? throughput.ratio : null,
+          detail: { ...throughput },
+        };
       }
-      return { spellId: entry.spellId, kind: entry.kind, applicable, metrics };
+      return { ...base, applicable: true, metrics };
     });
   }
 }

@@ -10,6 +10,8 @@ export interface MetricValue {
 }
 
 export interface RawEntryMetrics {
+  token: string;
+  /** The spell this log actually used for the entry (for display). */
   spellId: number;
   kind: EntryKind;
   /** False when the entry doesn't apply to this player (e.g. cooldown not talented). */
@@ -28,6 +30,7 @@ export interface ScoredMetric extends MetricValue {
 }
 
 export interface ScoredEntry {
+  token: string;
   spellId: number;
   kind: EntryKind;
   rank: number;
@@ -68,7 +71,7 @@ export function scoreProfile(
 ): ProfileResults {
   const entries = profile.entries
     .map((entry): ScoredEntry => {
-      const raw = entryMetrics.find((m) => m.spellId === entry.spellId && m.kind === entry.kind);
+      const raw = entryMetrics.find((m) => m.token === entry.token && m.kind === entry.kind);
       const metrics: ScoredEntry['metrics'] = {};
       for (const kind of entry.metrics) {
         const metric = raw?.metrics[kind];
@@ -77,7 +80,8 @@ export function scoreProfile(
         }
       }
       return {
-        spellId: entry.spellId,
+        token: entry.token,
+        spellId: raw?.spellId ?? entry.spellIds[0] ?? 0,
         kind: entry.kind,
         rank: entry.rank,
         label: entry.label,
@@ -125,6 +129,7 @@ export interface CooldownWindow {
 }
 
 export interface CooldownWindowSet {
+  token: string;
   spellId: number;
   rank: number;
   label?: string;

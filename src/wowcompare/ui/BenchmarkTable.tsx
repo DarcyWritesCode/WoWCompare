@@ -87,7 +87,7 @@ export default function BenchmarkTable({
           {playerResults.entries.flatMap((entry, entryIndex) =>
             kindsFor(entryIndex).map((kind) => (
               <tr
-                key={`${entry.kind}-${entry.spellId}-${kind}`}
+                key={`${entry.kind}-${entry.token}-${kind}`}
                 style={{ opacity: entry.applicable ? 1 : 0.4 }}
               >
                 <td>{entry.rank}</td>

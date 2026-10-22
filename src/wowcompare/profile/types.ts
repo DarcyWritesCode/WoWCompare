@@ -21,32 +21,34 @@ export interface Thresholds {
 
 export type EntryKind = 'buff' | 'debuff' | 'cooldown';
 
-export interface ProfileEntry {
-  /** For buffs/debuffs, the aura ID. For cooldowns, the cast spell ID. */
-  spellId: number;
+/**
+ * A spell as a profile names it: a stable token (SimC's, e.g. `tigers_fury`) plus candidate IDs.
+ * Analyzers resolve it against the log, preferring spells whose in-game name matches the token,
+ * since spell tables carry several IDs per name (cast vs buff vs dot, old tier sets).
+ */
+export interface SpellRef {
+  token: string;
+  spellIds: number[];
+}
+
+export interface ProfileEntry extends SpellRef {
   kind: EntryKind;
   /** 1 = most important. */
   rank: number;
   metrics: MetricKind[];
   thresholds?: Partial<Record<MetricKind, Thresholds>>;
-  /** Casts that consume this proc (required for `procUsage`). */
-  consumerSpellIds?: number[];
-  /** Cooldowns: the buff that marks the window, if it isn't the cast spell's own ID. */
-  windowBuffId?: number;
+  /** Casts that consume this proc (for `procUsage`). */
+  consumers?: SpellRef[];
   /** Cooldowns without a buff: fixed window length after each cast, in ms. */
   windowMs?: number;
   /** Optional display name; the UI otherwise uses the spell's name. */
   label?: string;
-  /**
-   * The entry applies only if the player has one of these abilities (talent check), e.g. the
-   * cast behind a debuff. Without it, buffs apply when seen in the log.
-   */
-  requiresSpellIds?: number[];
+  /** The entry applies only if the player has this ability, e.g. the cast behind a debuff. */
+  requires?: SpellRef;
 }
 
 export interface AuraCondition {
-  /** Any one of these auras satisfies the condition (e.g. Berserk or Incarnation). */
-  auraIds: number[];
+  aura: SpellRef;
   /** `player`: a buff on the player from any source. `target`: the player's debuff on the cast target. */
   on: 'player' | 'target';
   present: boolean;
@@ -57,7 +59,7 @@ export interface CastRule {
   id: string;
   description: string;
   rank: number;
-  onCast: number[];
+  onCast: SpellRef;
   /** All conditions must hold. */
   require: AuraCondition[];
   /** False when the source (e.g. an APL) only favours the conditions rather than requiring them. */

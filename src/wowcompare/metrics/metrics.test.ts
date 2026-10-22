@@ -65,20 +65,21 @@ describe('scoreProfile', () => {
     version: 2,
     entries: [
       {
-        spellId: 2,
+        token: 'b',
+        spellIds: [2],
         kind: 'buff',
         rank: 2,
         metrics: ['uptime'],
         thresholds: { uptime: { pass: 0.9, warn: 0.8 } },
       },
-      { spellId: 1, kind: 'debuff', rank: 1, metrics: ['uptime'] },
+      { token: 'a', spellIds: [1], kind: 'debuff', rank: 1, metrics: ['uptime'] },
     ],
     rules: [
       {
         id: 'r',
         description: 'r',
         rank: 1,
-        onCast: [3],
+        onCast: { token: 'c', spellIds: [3] },
         require: [],
         thresholds: { pass: 1, warn: 0.5 },
       },
@@ -90,12 +91,14 @@ describe('scoreProfile', () => {
       profile,
       [
         {
+          token: 'b',
           spellId: 2,
           kind: 'buff',
           applicable: true,
           metrics: { uptime: { value: 0.85, detail: {} } },
         },
         {
+          token: 'a',
           spellId: 1,
           kind: 'debuff',
           applicable: true,
