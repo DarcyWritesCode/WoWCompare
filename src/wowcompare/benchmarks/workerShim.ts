@@ -4,22 +4,27 @@
 const scope = globalThis as unknown as { window?: unknown; document?: unknown };
 
 /** Accepts any property access, call or assignment and does nothing. */
-const inert: unknown = new Proxy(() => undefined, {
-  get: (_target, prop) => {
-    if (prop === Symbol.toPrimitive) {
-      return () => '';
-    }
-    if (prop === Symbol.iterator) {
-      return function* () {
-        yield* [];
-      };
-    }
-    return inert;
+const inert: unknown = new Proxy(
+  function inertTarget() {
+    return undefined;
   },
-  apply: () => inert,
-  construct: () => inert as object,
-  set: () => true,
-});
+  {
+    get: (_target, prop) => {
+      if (prop === Symbol.toPrimitive) {
+        return () => '';
+      }
+      if (prop === Symbol.iterator) {
+        return function* () {
+          yield* [];
+        };
+      }
+      return inert;
+    },
+    apply: () => inert,
+    construct: () => inert as object,
+    set: () => true,
+  },
+);
 
 scope.window ??= globalThis;
 // Browser-only globals some modules call at load time.
