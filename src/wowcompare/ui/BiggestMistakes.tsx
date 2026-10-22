@@ -1,9 +1,10 @@
 import { formatNumber } from 'common/format';
-import { SpellLink } from 'interface';
+import { SpellIcon } from 'interface';
 
 import { biggestMistakes } from '../benchmarks/mistakes';
 import { LogSnapshot } from '../metrics/results';
 import { Profile } from '../profile/types';
+import { classSpellMatcher } from '../simc/specs';
 
 /** The player's biggest gaps to the reference benchmark, ordered by estimated DPS lost. */
 export default function BiggestMistakes({
@@ -18,7 +19,7 @@ export default function BiggestMistakes({
   /** e.g. "the top-10 median". */
   referenceLabel: string;
 }) {
-  const mistakes = biggestMistakes(profile, player, topLogs);
+  const mistakes = biggestMistakes(profile, player, topLogs, classSpellMatcher(profile.specId));
   if (mistakes.length === 0) {
     return <p className="text-muted">No clear gaps to {referenceLabel}.</p>;
   }
@@ -27,7 +28,7 @@ export default function BiggestMistakes({
       <ol>
         {mistakes.map((m) => (
           <li key={m.key} style={{ marginBottom: 4 }}>
-            <SpellLink spell={m.spellId} /> <strong>{m.title}</strong>: {m.detail}.{' '}
+            <SpellIcon spell={m.spellId} /> <strong>{m.title}</strong>: {m.detail}.{' '}
             <span className="text-muted">
               ≈{formatNumber(m.dps)} DPS ({((m.dps / player.fightDps) * 100).toFixed(1)}% of yours)
             </span>

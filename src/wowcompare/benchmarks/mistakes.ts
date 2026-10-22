@@ -1,4 +1,4 @@
-import { CooldownWindowSet, LogSnapshot } from '../metrics/results';
+import { CooldownWindowSet, LogSnapshot, WindowEntryState } from '../metrics/results';
 import { Profile, ProfileEntry, SpellRef } from '../profile/types';
 import { median } from './aggregate';
 
@@ -227,6 +227,150 @@ function entryMistakes(profile: Profile, player: LogSnapshot, topLogs: LogSnapsh
   });
 }
 
+/** How much more pooled (as a share of the resource's max) before it's worth flagging. */
+const MIN_POOL_GAP = 0.1;
+/** How much more often a buff must be lined up in top logs before it's worth flagging. */
+const MIN_LINEUP_GAP = 0.25;
+/** Fewer windows than this and the with/without comparison is noise. */
+const MIN_SAMPLES = 6;
+/** Very short windows have spiky DPS that swamps the comparison. */
+const MIN_SAMPLE_MS = 3_000;
+
+interface WindowSample {
+  state: WindowEntryState;
+  /** Window DPS as a multiple of that log's average DPS, so logs with different gear compare. */
+  value: number;
+}
+
+function samples(log: LogSnapshot, token: string): WindowSample[] {
+  const set = log.windows.find((s) => s.token === token);
+  if (!set?.entryStates || log.fightDps <= 0) {
+    return [];
+  }
+  return set.windows.flatMap((window, i) =>
+    set.entryStates[i] && window.durationMs >= MIN_SAMPLE_MS
+      ? [
+          {
+            state: set.entryStates[i],
+            value: (window.dps * window.durationMs) / 1000 / log.fightDps,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * What the player brings into each cooldown vs the top logs: resources pooled and class buffs
+ * lined up. Pooling is valued as the extra points x the player's damage per point x the window's
+ * extra multiplier; a buff by how much higher window DPS is with it up than without (across the
+ * player's and the top logs' windows together).
+ */
+function entryStateMistakes(
+  profile: Profile,
+  player: LogSnapshot,
+  topLogs: LogSnapshot[],
+  isClassSpell: (spellId: number, token: string) => boolean,
+): Mistake[] {
+  const seconds = player.durationMs / 1000;
+  return player.windows.flatMap((set) => {
+    const mine = samples(player, set.token);
+    const top = topLogs.map((log) => samples(log, set.token)).filter((s) => s.length > 0);
+    const pooled = [...mine, ...top.flat()];
+    if (mine.length === 0 || top.length === 0) {
+      return [];
+    }
+    const cooldown = set.label ?? cooldownName(player, set);
+    const mistakes: Mistake[] = [];
+
+    // Resources: each point pooled is spent inside the window instead of outside it, so it
+    // gains the window's extra damage on top of what the spender does anyway.
+    const index = profile.entries.findIndex((e) => e.token === set.token);
+    const ratio = player.results.entries[index]?.metrics.windowDps?.value ?? null;
+    for (const resource of Object.keys(mine[0].state.resources)) {
+      const at = (list: WindowSample[]) =>
+        median(
+          list
+            .map((s) => s.state.resources[resource])
+            .filter((v): v is number => typeof v === 'number'),
+        );
+      const myLevel = at(mine);
+      const topLevel = median(top.map(at).filter((v): v is number => v !== null));
+      const value = player.resourceValues?.[resource];
+      if (
+        myLevel === null ||
+        !topLevel ||
+        topLevel - myLevel < MIN_POOL_GAP ||
+        !value ||
+        !ratio ||
+        ratio <= 1
+      ) {
+        continue;
+      }
+      const points = (topLevel - myLevel) * value.max;
+      mistakes.push({
+        key: `pool-${set.token}-${resource}`,
+        spellId: set.spellId,
+        title: `Pool more ${resource} before ${cooldown}`,
+        detail: `${pct(myLevel)} vs ${pct(topLevel)} of max at the cast`,
+        dps: (points * value.damagePerPoint * (ratio - 1) * set.windows.length) / seconds,
+      });
+    }
+
+    const buffs = new Map<string, { name: string; spellId: number }>();
+    for (const sample of pooled) {
+      for (const [token, buff] of Object.entries(sample.state.buffs)) {
+        if (token !== set.token && isClassSpell(buff.spellId, token) && !buffs.has(token)) {
+          buffs.set(token, buff);
+        }
+      }
+    }
+    for (const [token, buff] of buffs) {
+      const share = (list: WindowSample[]) =>
+        list.filter((s) => s.state.buffs[token]).length / list.length;
+      const myShare = share(mine);
+      const topShare = median(top.map(share)) ?? 0;
+      const withBuff = pooled.filter((s) => s.state.buffs[token]).map((s) => s.value);
+      const without = pooled.filter((s) => !s.state.buffs[token]).map((s) => s.value);
+      if (
+        topShare - myShare < MIN_LINEUP_GAP ||
+        withBuff.length + without.length < MIN_SAMPLES ||
+        withBuff.length < 2 ||
+        without.length < 2
+      ) {
+        continue;
+      }
+      // Window DPS relative to the log's average (so window length doesn't count), medians so
+      // one odd window can't dominate. Capped at what the buff itself is worth: the DPS gain
+      // while it's up vs down over the whole fight (player's, else the top logs' median), applied
+      // to the window's damage.
+      const buffRatio =
+        player.auras.find((a) => a.token === token && a.kind === 'buff')?.dpsRatio ??
+        median(
+          topLogs
+            .map((log) => log.auras.find((a) => a.token === token && a.kind === 'buff')?.dpsRatio)
+            .filter((v): v is number => typeof v === 'number'),
+        );
+      const windowDps = (ratio ?? 1) * player.fightDps;
+      const cap = buffRatio && buffRatio > 1 ? (buffRatio - 1) * windowDps * windowSeconds(set) : 0;
+      const gain = Math.min(
+        (median(withBuff)! - median(without)!) * player.fightDps * windowSeconds(set),
+        cap,
+      );
+      const dps = (gain * (topShare - myShare) * set.windows.length) / seconds;
+      if (dps > 0) {
+        mistakes.push({
+          key: `lineup-${set.token}-${token}`,
+          spellId: buff.spellId,
+          title: `Have ${buff.name} up going into ${cooldown}`,
+          detail: `up for ${pct(myShare)} vs ${pct(topShare)} of casts`,
+          dps,
+        });
+      }
+    }
+    return mistakes;
+  });
+}
+
 /**
  * The player's biggest gaps to the top-10 median, each with a rough DPS cost, biggest first.
  * Every estimate values the gap at the player's own damage (casts, DoT damage), so gear
@@ -236,11 +380,17 @@ export function biggestMistakes(
   profile: Profile,
   player: LogSnapshot,
   topLogs: LogSnapshot[],
+  /** Limits buff line-up checks to class buffs (no flasks, food or trinket procs). */
+  isClassSpell: (spellId: number, token: string) => boolean = () => true,
 ): Mistake[] {
   if (topLogs.length === 0 || player.durationMs <= 0) {
     return [];
   }
-  return [...windowMistakes(profile, player, topLogs), ...entryMistakes(profile, player, topLogs)]
+  return [
+    ...windowMistakes(profile, player, topLogs),
+    ...entryMistakes(profile, player, topLogs),
+    ...entryStateMistakes(profile, player, topLogs, isClassSpell),
+  ]
     .filter((m) => Number.isFinite(m.dps) && m.dps >= player.fightDps * MIN_SHARE)
     .sort((a, b) => b.dps - a.dps)
     .slice(0, MAX_MISTAKES);

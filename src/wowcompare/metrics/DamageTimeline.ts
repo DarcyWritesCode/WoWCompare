@@ -13,7 +13,7 @@ class DamageTimeline extends Analyzer {
     targetID?: number;
     targetInstance?: number;
     /** The player's resources as of the cast, e.g. Astral Power before a cooldown. */
-    resources?: { type: number; amount: number; max: number }[];
+    resources?: { type: number; amount: number; max: number; cost?: number }[];
   }[] = [];
   /** In-game names of every spell seen in `damage` and `casts`. */
   readonly names = new Map<number, string>();
@@ -31,7 +31,12 @@ class DamageTimeline extends Analyzer {
       spellId: event.ability.guid,
       targetID: event.targetID,
       targetInstance: event.targetInstance,
-      resources: event.classResources?.map(({ type, amount, max }) => ({ type, amount, max })),
+      resources: event.classResources?.map(({ type, amount, max, cost }) => ({
+        type,
+        amount,
+        max,
+        cost,
+      })),
     });
   }
 

@@ -180,6 +180,8 @@ export interface AuraUsage {
   kind: 'buff' | 'debuff';
   /** Fraction of the fight it was up (debuffs: on any enemy). */
   uptime: number;
+  /** DPS while it was up divided by DPS while it wasn't; null if never or always up. */
+  dpsRatio: number | null;
 }
 
 /** An ability's damage over the whole fight, grouped by name across spell IDs. */
@@ -191,8 +193,16 @@ export interface AbilityTotal {
   damage: number;
 }
 
+/** What a resource is worth to this player: max, and damage per point spent on spenders. */
+export interface ResourceValue {
+  max: number;
+  damagePerPoint: number;
+}
+
 /** Everything a parsed log contributes to the comparison. */
 export interface LogSnapshot {
+  /** By resource name. */
+  resourceValues: Record<string, ResourceValue>;
   durationMs: number;
   /** Damage and casts per ability over the whole fight. */
   abilities: AbilityTotal[];

@@ -1,3 +1,4 @@
+import RESOURCE_TYPES from 'game/RESOURCE_TYPES';
 import ROLES from 'game/ROLES';
 import { Panel } from 'interface';
 import Analyzer, { Options } from 'parser/core/Analyzer';
@@ -12,7 +13,7 @@ import DamageTimeline from './DamageTimeline';
 import Enemies from 'parser/shared/modules/Enemies';
 
 import { simcToken } from '../simc/resolve';
-import { mergeIntervals, totalDuration } from './intervals';
+import { mergeIntervals, totalDuration, windowThroughput } from './intervals';
 import { AbilityTotal, AuraUsage, LogSnapshot, ProfileResults, scoreProfile } from './results';
 
 /** Combines the metric modules into one scored, serializable result for the selected profile. */
@@ -77,6 +78,35 @@ class ProfileMetrics extends Analyzer {
     };
   }
 
+  /** Per resource: its max and the damage the player's spenders did per point spent. */
+  private resourceValues(): LogSnapshot['resourceValues'] {
+    const { casts, damage } = this.damageTimeline;
+    const spent = new Map<number, Map<number, number>>(); // type -> spellId -> points
+    const max = new Map<number, number>();
+    for (const cast of casts) {
+      for (const r of cast.resources ?? []) {
+        max.set(r.type, Math.max(max.get(r.type) ?? 0, r.max));
+        if (r.cost && r.cost > 0) {
+          const bySpell = spent.get(r.type) ?? new Map<number, number>();
+          bySpell.set(cast.spellId, (bySpell.get(cast.spellId) ?? 0) + r.cost);
+          spent.set(r.type, bySpell);
+        }
+      }
+    }
+    const values: LogSnapshot['resourceValues'] = {};
+    for (const [type, bySpell] of spent) {
+      const name = RESOURCE_TYPES[type]?.name;
+      const points = [...bySpell.values()].reduce((sum, p) => sum + p, 0);
+      const dealt = damage
+        .filter((hit) => bySpell.has(hit.spellId))
+        .reduce((sum, hit) => sum + hit.amount, 0);
+      if (name && points > 0) {
+        values[name] = { max: max.get(type) ?? 0, damagePerPoint: dealt / points };
+      }
+    }
+    return values;
+  }
+
   /** Damage and casts per ability over the fight, grouped by in-game name. */
   private abilityTotals(): AbilityTotal[] {
     const { damage, casts, names } = this.damageTimeline;
@@ -125,16 +155,17 @@ class ProfileMetrics extends Analyzer {
     Object.values(this.enemies.getEntities()).forEach((enemy) =>
       enemy.buffs.forEach(add('debuff')),
     );
-    return [...groups.values()].map((group) => ({
-      token: simcToken(group.name),
-      name: group.name,
-      spellId: group.spellId,
-      kind: group.kind,
-      uptime:
-        end > start
-          ? totalDuration(mergeIntervals(group.intervals, start, end)) / (end - start)
-          : 0,
-    }));
+    return [...groups.values()].map((group) => {
+      const intervals = mergeIntervals(group.intervals, start, end);
+      return {
+        token: simcToken(group.name),
+        name: group.name,
+        spellId: group.spellId,
+        kind: group.kind,
+        uptime: end > start ? totalDuration(intervals) / (end - start) : 0,
+        dpsRatio: windowThroughput(this.damageTimeline.damage, intervals, start, end).ratio,
+      };
+    });
   }
 
   /** Results plus window timelines: everything this log contributes to a comparison. */
@@ -155,6 +186,7 @@ class ProfileMetrics extends Analyzer {
       results,
       durationMs,
       abilities: this.abilityTotals(),
+      resourceValues: this.resourceValues(),
       auras: this.auraUsage(),
       build: { talents, heroTree },
       comp,
