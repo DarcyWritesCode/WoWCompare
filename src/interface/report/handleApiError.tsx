@@ -6,7 +6,9 @@ import {
   JsonParseError,
   LogNotFoundError,
   UnauthorizedError,
+  USE_WCL_V2,
 } from 'common/fetchWclApi';
+import { login as wclLogin } from 'common/wclV2/auth';
 import thunderSoundEffect from 'interface/audio/Thunder Sound effect.mp3';
 import FullscreenError from 'interface/FullscreenError';
 import ApiDownBackground from 'interface/images/api-down-background.gif';
@@ -40,13 +42,24 @@ export default function handleApiError(error: Error, onBack: () => void) {
           <button type="button" className="btn btn-primary" onClick={onBack}>
             &lt; <Trans id="interface.report.handleApiError.back">Back</Trans>
           </button>
-          <a
-            className="btn btn-primary"
-            style={{ marginLeft: 20 }}
-            href={`${import.meta.env.VITE_SERVER_BASE}login/wcl?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`}
-          >
-            <Trans id="interface.report.handleApiError.continue">Continue</Trans>
-          </a>
+          {USE_WCL_V2 ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ marginLeft: 20 }}
+              onClick={() => void wclLogin()}
+            >
+              <Trans id="interface.report.handleApiError.continue">Continue</Trans>
+            </button>
+          ) : (
+            <a
+              className="btn btn-primary"
+              style={{ marginLeft: 20 }}
+              href={`${import.meta.env.VITE_SERVER_BASE}login/wcl?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+            >
+              <Trans id="interface.report.handleApiError.continue">Continue</Trans>
+            </a>
+          )}
         </div>
       </FullscreenError>
     );

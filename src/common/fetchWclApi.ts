@@ -3,6 +3,8 @@ import { AnyEvent } from 'parser/core/Events';
 
 import { QueryParams } from './makeApiUrl';
 import makeWclApiUrl from './makeWclApiUrl';
+import { fetchV1Endpoint } from './wclV2/adapter';
+import { WclV2AuthRequiredError, WclV2GraphqlError } from './wclV2/graphql';
 import {
   WclTable,
   WclOptions,
@@ -90,9 +92,35 @@ export async function toJson(response: string | Response) {
   }
 }
 
+export const USE_WCL_V2 = import.meta.env.VITE_WCL_API_VERSION === '2';
+
+async function rawFetchWclV2(endpoint: string, queryParams: QueryParams) {
+  try {
+    const json = await fetchV1Endpoint(endpoint, queryParams);
+    if (json === null) {
+      throw new LogNotFoundError();
+    }
+    return json;
+  } catch (error) {
+    if (error instanceof WclV2AuthRequiredError) {
+      throw new UnauthorizedError();
+    }
+    if (error instanceof WclV2GraphqlError) {
+      if (error.messages.some((m) => /does not exist|private|permission/i.test(m))) {
+        throw new LogNotFoundError();
+      }
+      throw new WclApiError(error.message);
+    }
+    throw error;
+  }
+}
+
 async function rawFetchWcl(endpoint: string, queryParams: QueryParams, noCache = false) {
   if (import.meta.env.MODE === 'test') {
     throw new Error('Unable to query WCL during test');
+  }
+  if (USE_WCL_V2) {
+    return rawFetchWclV2(endpoint, queryParams);
   }
   const url = makeWclApiUrl(endpoint, queryParams);
   const response = await fetch(url, {

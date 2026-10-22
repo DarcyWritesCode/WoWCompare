@@ -26,6 +26,7 @@ const appRoutes = createRoutesFromElements(
       <Route path=":resultTab" lazy={() => import('./routes/report/dynamic')} />
     </Route>
     <Route path="privacy" lazy={() => import('./routes/privacy')} />
+    <Route path="wcl-callback" lazy={() => import('./routes/wcl-callback')} />
     <Route element={<HomeLayout />}>
       <Route index lazy={() => import('./routes/news')} />
       <Route path="news" lazy={() => import('./routes/news')} />
