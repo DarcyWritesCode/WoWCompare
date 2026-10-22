@@ -1,7 +1,9 @@
+import { Panel } from 'interface';
 import Analyzer, { Options } from 'parser/core/Analyzer';
 
 import { getProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
+import ProfileResultsTable from '../ui/ProfileResultsTable';
 import BuffMetrics from './BuffMetrics';
 import ConditionRules from './ConditionRules';
 import CooldownMetrics from './CooldownMetrics';
@@ -40,6 +42,24 @@ class ProfileMetrics extends Analyzer {
     ];
     const ruleResults = this.conditionRules.active ? this.conditionRules.results() : [];
     return scoreProfile(this.profile, entryMetrics, ruleResults);
+  }
+
+  tab() {
+    const results = this.results();
+    if (!results || !this.profile) {
+      return;
+    }
+    return {
+      title: 'Profile',
+      url: 'profile',
+      render: () => (
+        <Panel
+          title={`${this.profile!.name} (v${this.profile!.version}, patch ${this.profile!.patch})`}
+        >
+          <ProfileResultsTable results={results} />
+        </Panel>
+      ),
+    };
   }
 }
 
