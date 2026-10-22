@@ -109,7 +109,8 @@
     "spell-lists:update": "node --experimental-strip-types scripts/spell-lists/update-all-lists.ts src/analysis/**/*.ts",
     "preview": "vite build && vite preview",
     "format": "oxfmt",
-    "format:check": "pnpm run format --check"
+    "format:check": "pnpm run format --check",
+    "build:pages": "vite build --mode pages"
   },
   "lint-staged": {
     "*": [

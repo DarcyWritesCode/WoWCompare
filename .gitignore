@@ -81,3 +81,7 @@ coverage/*
 
 # #vitest/ui
 html/
+
+# Cloudflare Pages build output and wrangler state
+dist
+.wrangler
