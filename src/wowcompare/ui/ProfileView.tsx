@@ -1,6 +1,7 @@
 import { PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { LogSnapshot } from '../metrics/results';
 import { Profile } from '../profile/types';
+import AplExpectations from './AplExpectations';
 import BenchmarkTable from './BenchmarkTable';
 import ProfileResultsTable from './ProfileResultsTable';
 import useBenchmarks, { BenchmarkInputs } from './useBenchmarks';
@@ -54,6 +55,22 @@ export default function ProfileView({
             </button>
           )}{' '}
           {status && <p className="text-muted">{status}</p>}
+        </>
+      )}
+
+      {columns && (
+        <>
+          <h2>APL expectations vs top parses</h2>
+          <p className="text-muted">
+            What the APL asks for, and how often the top 10 parses actually do it. "Favoured" lines
+            are ones the APL prefers under a buff without requiring it.
+          </p>
+          <AplExpectations
+            player={snapshot.results}
+            topLogs={logs
+              .filter((log) => log.roles.some((role) => role.startsWith('Top 10')))
+              .map((log) => log.snapshot)}
+          />
         </>
       )}
 

@@ -65,7 +65,12 @@ export function buildProfile(
         spellId,
         kind: 'buff' as const,
         metrics: ['procUsage' as const],
-        consumerSpellIds: [...new Set(proc.consumers.flatMap((c) => resolve(c, 'action')))],
+        consumerSpellIds: [
+          ...new Set([
+            ...proc.consumers.flatMap((c) => resolve(c, 'action')),
+            ...(adapter.extraConsumers?.[proc.token] ?? []),
+          ]),
+        ],
       })),
     })),
   ].sort((a, b) => a.order - b.order);
@@ -86,11 +91,10 @@ export function buildProfile(
     }
   }
 
-  const rules: CastRule[] = summary.cooldowns
-    .filter((cd) => cd.requires.length > 0)
-    .map((cd, i) => {
-      const onCast = resolve(cd.token, 'action');
-      const require = cd.requires.map((req) => ({
+  const rules: CastRule[] = summary.rules
+    .map((aplRule, i) => {
+      const onCast = resolve(aplRule.token, 'action');
+      const require = aplRule.requires.map((req) => ({
         auraIds: resolve(req.token, req.on === 'player' ? 'buff' : 'dot'),
         on: req.on,
         present: req.present,
@@ -100,8 +104,9 @@ export function buildProfile(
         .map((r) => `${describe(r.auraIds)} is ${r.present ? 'up' : 'down'}`)
         .join(' and ');
       return {
-        id: `${cd.token}-requires`,
+        id: `${aplRule.token}-${aplRule.strict ? 'requires' : 'prefers'}-${aplRule.requires.map((r) => r.token).join('-')}`,
         description: `${describe(onCast)} cast while ${conditions}`,
+        strict: aplRule.strict,
         rank: i + 1,
         onCast,
         require,

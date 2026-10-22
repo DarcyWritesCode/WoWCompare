@@ -60,6 +60,8 @@ export interface CastRule {
   onCast: number[];
   /** All conditions must hold. */
   require: AuraCondition[];
+  /** False when the source (e.g. an APL) only favours the conditions rather than requiring them. */
+  strict?: boolean;
   /** Applied to the fraction of casts that met the conditions. */
   thresholds?: Thresholds;
 }

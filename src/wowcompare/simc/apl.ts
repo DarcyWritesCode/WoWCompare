@@ -132,3 +132,14 @@ export function positiveBuffChecks(expr: string | undefined): string[] {
     (m) => m[2],
   );
 }
+
+/**
+ * Positive buff checks used as boolean terms (after `&`, `|`, `(` or at the start), leaving out
+ * arithmetic like `2+(2*buff.bs_inc.up)`.
+ */
+export function booleanBuffChecks(expr: string | undefined): string[] {
+  if (!expr) {
+    return [];
+  }
+  return [...expr.matchAll(/(^|[&|(])buff\.([a-z0-9_]+)\.(up|react)(?=$|[&|)])/g)].map((m) => m[2]);
+}

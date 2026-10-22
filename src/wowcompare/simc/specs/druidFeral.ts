@@ -35,6 +35,8 @@ const druidFeral: SpecAdapter = {
     sudden_ambush: { buff: [SPELLS_DRUID.SUDDEN_AMBUSH_BUFF.id] },
     apex_predators_craving: { buff: [SPELLS_DRUID.APEX_PREDATORS_CRAVING_BUFF.id] },
   },
+  // Sudden Ambush lets Rake hit as if from stealth; the APL only covers that via buff.prowl.
+  extraConsumers: { sudden_ambush: [SPELLS_DRUID.RAKE.id] },
   // Channelled, no buff: grade the channel plus its tail.
   windowMs: { convoke_the_spirits: 4_000 },
   heroTrees: [

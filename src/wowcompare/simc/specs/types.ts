@@ -13,6 +13,11 @@ export interface SpecAdapter {
   /** Spell tables searched for SimC tokens. */
   tables: Record<string, Spell>[];
   aliases: AliasTable;
+  /**
+   * Spenders the APL doesn't express as buff checks, by proc token, e.g. Sudden Ambush making
+   * Rake act as if stealthed. Merged with the consumers found in the APL.
+   */
+  extraConsumers?: Record<string, number[]>;
   /** Cooldowns without a buff: window length after each cast, by SimC token. */
   windowMs?: Record<string, number>;
   heroTrees?: HeroTree[];
