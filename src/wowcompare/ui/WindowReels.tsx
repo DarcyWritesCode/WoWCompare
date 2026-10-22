@@ -139,9 +139,9 @@ function WindowCard({ index, window, fightDps, maxDps }: CardProps) {
         </line>
       </svg>
       <div style={{ position: 'relative', height: CAST_LANE_HEIGHT, marginTop: 4 }}>
-        {window.casts.map((cast) => (
+        {window.casts.map((cast, i) => (
           <span
-            key={`${cast.offsetMs}-${cast.spellId}`}
+            key={`${cast.offsetMs}-${cast.spellId}-${i}`}
             style={{ position: 'absolute', left: x(cast.offsetMs) - ICON_SIZE / 2, top: 0 }}
           >
             <SpellIcon spell={cast.spellId} style={{ width: ICON_SIZE, height: ICON_SIZE }} />

@@ -94,8 +94,17 @@ interface PendingRequest {
   ref: LogRef;
   resolve: (snapshot: LogSnapshot | null) => void;
   reject: (err: Error) => void;
+  /** Pool slot of the worker handling it. */
+  slot: number;
+  timer: ReturnType<typeof setTimeout>;
 }
 const pending = new Map<number, PendingRequest>();
+
+/**
+ * A log that hasn't come back by now is treated as failed and its worker replaced: a worker that
+ * runs out of memory can die without an error event, which would otherwise stall loading forever.
+ */
+const PARSE_TIMEOUT_MS = 120_000;
 
 /** A worker that fails to load (e.g. a module touching the DOM) disables the pool for good. */
 function abandonWorkers(err: unknown) {
@@ -104,39 +113,73 @@ function abandonWorkers(err: unknown) {
   workers = null;
   const requests = [...pending.values()];
   pending.clear();
-  requests.forEach(({ config, profile, ref, resolve, reject }) =>
-    parseOnMainThread(config, profile, ref).then(resolve, reject),
-  );
+  requests.forEach(({ config, profile, ref, resolve, reject, timer }) => {
+    clearTimeout(timer);
+    parseOnMainThread(config, profile, ref).then(resolve, reject);
+  });
+}
+
+function createWorker(): Worker {
+  const worker = new Worker(new URL('./parseWorker.ts', import.meta.url), { type: 'module' });
+  worker.onmessage = ({ data }: MessageEvent<ParseResponse>) => {
+    const request = pending.get(data.id);
+    if (!request) {
+      return;
+    }
+    pending.delete(data.id);
+    clearTimeout(request.timer);
+    if ('error' in data) {
+      request.reject(new Error(data.error));
+    } else {
+      request.resolve(data.snapshot);
+    }
+  };
+  worker.onerror = (event) => {
+    event.preventDefault();
+    abandonWorkers(`${event.message} (${event.filename}:${event.lineno})`);
+  };
+  return worker;
 }
 
 /** Lazily starts the worker pool; null where workers aren't available (falls back to the main thread). */
 function getWorkers(): Worker[] | null {
   if (workers === undefined) {
     try {
-      workers = Array.from({ length: WORKER_COUNT }, () => {
-        const worker = new Worker(new URL('./parseWorker.ts', import.meta.url), {
-          type: 'module',
-        });
-        worker.onmessage = ({ data }: MessageEvent<ParseResponse>) => {
-          const request = pending.get(data.id);
-          pending.delete(data.id);
-          if ('error' in data) {
-            request?.reject(new Error(data.error));
-          } else {
-            request?.resolve(data.snapshot);
-          }
-        };
-        worker.onerror = (event) => {
-          event.preventDefault();
-          abandonWorkers(`${event.message} (${event.filename}:${event.lineno})`);
-        };
-        return worker;
-      });
+      workers = Array.from({ length: WORKER_COUNT }, createWorker);
     } catch (err) {
       abandonWorkers(err);
     }
   }
   return workers ?? null;
+}
+
+/** Fails a stuck request and swaps in a fresh worker; the slot's other requests are re-sent. */
+function timeOut(id: number) {
+  const request = pending.get(id);
+  if (!request || !workers) {
+    return;
+  }
+  pending.delete(id);
+  request.reject(new Error(`Timed out after ${PARSE_TIMEOUT_MS / 1000}s`));
+  workers[request.slot].terminate();
+  workers[request.slot] = createWorker();
+  for (const [otherId, other] of pending) {
+    if (other.slot === request.slot) {
+      clearTimeout(other.timer);
+      send(otherId, other);
+    }
+  }
+}
+
+function send(id: number, request: Omit<PendingRequest, 'timer'>) {
+  const timer = setTimeout(() => timeOut(id), PARSE_TIMEOUT_MS);
+  pending.set(id, { ...request, timer });
+  workers![request.slot].postMessage({
+    id,
+    specId: request.config.spec.id,
+    profile: request.profile,
+    ref: request.ref,
+  } satisfies ParseRequest);
 }
 
 function parseOnMainThread(config: Config, profile: Profile, ref: LogRef) {
@@ -150,10 +193,9 @@ function parseInWorker(config: Config, profile: Profile, ref: LogRef): Promise<L
     return parseOnMainThread(config, profile, ref);
   }
   const id = (nextRequestId += 1);
-  const worker = pool[nextWorker++ % pool.length];
+  const slot = nextWorker++ % pool.length;
   return new Promise((resolve, reject) => {
-    pending.set(id, { config, profile, ref, resolve, reject });
-    worker.postMessage({ id, specId: config.spec.id, profile, ref } satisfies ParseRequest);
+    send(id, { config, profile, ref, resolve, reject, slot });
   });
 }
 
