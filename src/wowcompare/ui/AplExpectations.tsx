@@ -4,6 +4,7 @@ import { SpellLink } from 'interface';
 import { median } from '../benchmarks/aggregate';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { EntryKind, MetricKind } from '../profile/types';
+import { CompareBar, CompareLegend } from './charts';
 
 /** At or above this a log counts as following an expectation. */
 const FOLLOWED = 0.9;
@@ -92,6 +93,7 @@ export default function AplExpectations({
 
   return (
     <div style={{ overflowX: 'auto' }}>
+      <CompareLegend referenceLabel="top median" />
       <table className="table table-condensed">
         <thead>
           <tr>
@@ -99,7 +101,7 @@ export default function AplExpectations({
             <th>APL says</th>
             <th>You</th>
             <th>Top median</th>
-            <th>Top range</th>
+            <th>You vs top range</th>
             <th>Top logs at ≥{FOLLOWED * 100}%</th>
             <th>Verdict</th>
           </tr>
@@ -115,9 +117,16 @@ export default function AplExpectations({
                 <td>{pct(row.you)}</td>
                 <td>{pct(median(row.top))}</td>
                 <td>
-                  {row.top.length > 0
-                    ? `${pct(Math.min(...row.top))} – ${pct(Math.max(...row.top))}`
-                    : '—'}
+                  {row.top.length > 0 ? (
+                    <CompareBar
+                      value={row.you}
+                      reference={median(row.top)}
+                      range={[Math.min(...row.top), Math.max(...row.top)]}
+                      title={`You ${pct(row.you)}; top ${pct(Math.min(...row.top))} – ${pct(Math.max(...row.top))}, median ${pct(median(row.top))}`}
+                    />
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td>{row.top.length > 0 ? `${followed} / ${row.top.length}` : '—'}</td>
                 <td style={{ color }}>{text}</td>

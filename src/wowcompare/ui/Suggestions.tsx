@@ -8,6 +8,7 @@ import { LogSnapshot } from '../metrics/results';
 import { Customization, readCustomization, writeCustomization } from '../profile/customizations';
 import { Profile } from '../profile/types';
 import { METRIC_LABELS } from './ProfileResultsTable';
+import { CompareBar } from './charts';
 
 const pct = (value: number | null) => (value === null ? '—' : `${formatPercentage(value, 0)}%`);
 
@@ -97,6 +98,7 @@ export default function Suggestions({
                 <th>Top parses keeping it up</th>
                 <th>Top median uptime</th>
                 <th>You</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -127,6 +129,13 @@ export default function Suggestions({
                     <td>{pct(m.topShare)}</td>
                     <td>{pct(m.medianUptime)}</td>
                     <td>{pct(m.playerUptime)}</td>
+                    <td>
+                      <CompareBar
+                        value={m.playerUptime}
+                        reference={m.medianUptime}
+                        title={`You ${pct(m.playerUptime)}, top median ${pct(m.medianUptime)}`}
+                      />
+                    </td>
                   </tr>
                 );
               })}

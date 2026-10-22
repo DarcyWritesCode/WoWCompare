@@ -5,6 +5,7 @@ import { median } from '../benchmarks/aggregate';
 import { CooldownWindowSet, LogSnapshot } from '../metrics/results';
 import { classSpellMatcher } from '../simc/specs';
 import { STATUS_COLORS } from './ProfileResultsTable';
+import { CompareBar, CompareLegend } from './charts';
 
 /** A buff is listed if it's up going into most of the player's or the top logs' windows. */
 const COMMON = 0.5;
@@ -18,6 +19,8 @@ interface Row {
   top: number | null;
   /** How to show the values. */
   format: (value: number | null) => string;
+  /** Fractions (0–1) get a bar; counts like stacks don't. */
+  fraction?: boolean;
 }
 
 const pct = (value: number | null) => (value === null ? '—' : `${formatPercentage(value, 0)}%`);
@@ -47,6 +50,7 @@ function rowsFor(
       mine: at(set),
       top: stat(topSets, at),
       format: pct,
+      fraction: true,
     };
   });
 
@@ -81,6 +85,7 @@ function rowsFor(
       mine,
       top,
       format: pct,
+      fraction: true,
     });
     const myStacks = stacks(set, token);
     const topStacks = stat(topSets, (s) => stacks(s, token));
@@ -119,6 +124,7 @@ export default function CooldownEntry({
   const isClassSpell = classSpellMatcher(specId);
   return (
     <>
+      <CompareLegend referenceLabel={referenceLabel} range={false} />
       {player.windows.map((set) => {
         const topSets = topLogs
           .map((log) => log.windows.find((s) => s.token === set.token))
@@ -140,6 +146,7 @@ export default function CooldownEntry({
                   <th />
                   <th>You</th>
                   <th>Top median</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -157,6 +164,15 @@ export default function CooldownEntry({
                       {row.format(row.mine)}
                     </td>
                     <td>{row.format(row.top)}</td>
+                    <td>
+                      {row.fraction && (
+                        <CompareBar
+                          value={row.mine}
+                          reference={row.top}
+                          title={`You ${row.format(row.mine)}, top median ${row.format(row.top)}`}
+                        />
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

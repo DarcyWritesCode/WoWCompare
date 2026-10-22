@@ -110,6 +110,8 @@ export interface BenchmarkReference {
   /** e.g. "the top-10 median", "the #1 parse". */
   label: string;
   logs: LogSnapshot[];
+  /** Metric-by-metric medians of `logs`. */
+  results: ProfileResults;
 }
 
 function parsesFor(selection: BenchmarkSelection, kind: BenchmarkKind): RankedParse[] {
@@ -259,14 +261,15 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
     const referenceLogs = loaded.includes('top10')
       ? snapshotsOf(selection.top10)
       : snapshotsOf(selection.top ? [selection.top] : []);
-    const reference: BenchmarkReference = {
-      label: loaded.includes('top10') ? 'the top-10 median' : 'the #1 parse',
-      logs: referenceLogs,
-    };
     const referenceResults = medianResults(
       profile,
       referenceLogs.map((s) => s.results),
     );
+    const reference: BenchmarkReference = {
+      label: loaded.includes('top10') ? 'the top-10 median' : 'the #1 parse',
+      logs: referenceLogs,
+      results: referenceResults,
+    };
     const rescore = (column: BenchmarkColumn): BenchmarkColumn => ({
       ...column,
       results: column.results && rescoreAgainst(column.results, referenceResults),

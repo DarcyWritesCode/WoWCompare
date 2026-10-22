@@ -1,6 +1,5 @@
 import RESOURCE_TYPES from 'game/RESOURCE_TYPES';
 import ROLES from 'game/ROLES';
-import { Panel } from 'interface';
 import Analyzer, { Options } from 'parser/core/Analyzer';
 
 import { getBuiltProfile, getProfile } from '../profile/registry';
@@ -204,14 +203,12 @@ class ProfileMetrics extends Analyzer {
       title: 'Live Compare',
       url: 'live-compare',
       render: () => (
-        <Panel title={this.profile!.name}>
-          <ProfileView
-            profile={this.profile!}
-            unresolved={getBuiltProfile(this.profile!.specId)?.unresolved ?? []}
-            snapshot={snapshot}
-            benchmarkInputs={this.benchmarkProps}
-          />
-        </Panel>
+        <ProfileView
+          profile={this.profile!}
+          unresolved={getBuiltProfile(this.profile!.specId)?.unresolved ?? []}
+          snapshot={snapshot}
+          benchmarkInputs={this.benchmarkProps}
+        />
       ),
     };
   }
