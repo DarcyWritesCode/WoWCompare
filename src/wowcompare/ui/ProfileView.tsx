@@ -1,6 +1,6 @@
 import { formatDuration, formatNumber } from 'common/format';
 import { Panel } from 'interface';
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 
 import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
@@ -15,6 +15,7 @@ import CooldownDamage from './CooldownDamage';
 import CooldownEntry from './CooldownEntry';
 import ProfileResultsTable, { STATUS_COLORS } from './ProfileResultsTable';
 import Suggestions from './Suggestions';
+import { DPS_PER_ILVL, headline, Normalization, NO_NORMALIZATION } from './normalize';
 import useBenchmarks, { BenchmarkInputs, BenchmarkKind, BenchmarkReference } from './useBenchmarks';
 import WindowReels from './WindowReels';
 
@@ -24,6 +25,70 @@ const LOAD_HINTS: Partial<Record<BenchmarkKind, string>> = {
   bestClose: 'Best close parse (1 log)',
   top10Close: 'Top 10 close median (up to 10 logs)',
 };
+
+const NORMALIZATION_KEY = 'wowcompare:normalization';
+
+function readNormalization(): Normalization {
+  try {
+    return { ...NO_NORMALIZATION, ...JSON.parse(localStorage.getItem(NORMALIZATION_KEY) ?? '{}') };
+  } catch {
+    return NO_NORMALIZATION;
+  }
+}
+
+/** Checkboxes for what to take out of the comparison; remembered in this browser. */
+function NormalizationControls({
+  value,
+  onChange,
+  player,
+}: {
+  value: Normalization;
+  onChange: (value: Normalization) => void;
+  player: LogSnapshot;
+}) {
+  const options: { key: keyof Normalization; label: string; hint: string; disabled?: boolean }[] = [
+    {
+      key: 'killTime',
+      label: 'Kill time',
+      hint: `Rescale other logs to your ${formatDuration(player.durationMs)} kill: short kills fit more cooldowns per minute.`,
+    },
+    {
+      key: 'ilvl',
+      label: 'Item level',
+      hint: `Rescale other logs to your item level${player.ilvl ? ` (${player.ilvl.toFixed(1)})` : ''} at ≈${DPS_PER_ILVL * 100}% DPS per level.`,
+      disabled: !player.ilvl,
+    },
+    {
+      key: 'bossHp',
+      label: 'Boss HP (raid size)',
+      hint: 'Show damage as a share of the boss HP split evenly across the raid; 100% is an even share. Boss HP scales with raid size, so this compares raids of different sizes.',
+      disabled: !player.bossHp,
+    },
+  ];
+  return (
+    <div
+      style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 12 }}
+    >
+      <span className="text-muted">Normalize for:</span>
+      {options.map((option) => (
+        <label
+          key={option.key}
+          title={option.hint}
+          style={{ fontWeight: 'normal', margin: 0, opacity: option.disabled ? 0.5 : 1 }}
+        >
+          <input
+            type="checkbox"
+            checked={value[option.key]}
+            disabled={option.disabled}
+            onChange={(e) => onChange({ ...value, [option.key]: e.target.checked })}
+            style={{ marginRight: 6 }}
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 /** Scored metrics and rules by status, for the "on par" tile. */
 function statusCounts(results: ProfileResults) {
@@ -54,15 +119,28 @@ function Summary({
   results,
   reference,
   mistakes,
+  normalization,
 }: {
   player: LogSnapshot;
   results: ProfileResults;
   reference: BenchmarkReference;
   mistakes: Mistake[];
+  normalization: Normalization;
 }) {
-  const topDps = reference.logs.map((log) => log.fightDps).filter((dps) => dps > 0);
+  const hp = normalization.bossHp;
+  const unit = hp ? 'share of boss HP' : 'DPS';
+  const format = hp ? (v: number) => `${Math.round(v * 100)}%` : formatNumber;
+  const mine = headline(player, player, normalization) ?? 0;
+  const topDps = reference.logs
+    .map((log) => headline(log, player, normalization))
+    .filter((v): v is number => v !== null && v > 0);
   const referenceDps = median(topDps);
-  const share = referenceDps ? player.fightDps / referenceDps : null;
+  const share = referenceDps ? mine / referenceDps : null;
+  const adjusted = [
+    normalization.killTime && 'kill time',
+    normalization.ilvl && 'item level',
+  ].filter(Boolean);
+  const scaledNote = adjusted.length > 0 ? `scaled to your ${adjusted.join(' and ')}` : null;
   const counts = statusCounts(results);
   const worst = mistakes[0];
 
@@ -70,16 +148,19 @@ function Summary({
     <>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
         <StatTile
-          label="Your DPS"
-          value={formatNumber(player.fightDps)}
+          label={hp ? 'Your share of boss HP' : 'Your DPS'}
+          value={format(mine)}
           sub={`over ${formatDuration(player.durationMs)}`}
           color={CHART_COLORS.you}
         />
         {referenceDps && (
           <StatTile
-            label={`${reference.label.replace(/^the /, '')} DPS`}
-            value={formatNumber(referenceDps)}
-            sub={share !== null && `you're at ${Math.round(share * 100)}%`}
+            label={`${reference.label.replace(/^the /, '')} ${hp ? 'share' : 'DPS'}`}
+            value={format(referenceDps)}
+            sub={
+              share !== null &&
+              `you're at ${Math.round(share * 100)}%${scaledNote ? `, ${scaledNote}` : ''}`
+            }
           />
         )}
         {counts.total > 0 && (
@@ -103,8 +184,10 @@ function Summary({
       <p style={{ fontSize: '1.1em' }}>
         {share !== null && (
           <>
-            You did <strong>{Math.round(share * 100)}%</strong> of {reference.label}'s DPS. Some of
-            that is gear, raid comp and kill time, which play can't close.{' '}
+            You did <strong>{Math.round(share * 100)}%</strong> of {reference.label}'s {unit}
+            {scaledNote && ` (${scaledNote})`}.{' '}
+            {adjusted.length < 2 &&
+              "Some of the gap is gear, raid comp and kill time, which play can't close; the checkboxes above take those out."}{' '}
           </>
         )}
         {mistakes.length > 0 ? (
@@ -121,9 +204,9 @@ function Summary({
       {topDps.length > 1 && (
         <>
           <p className="text-muted" style={{ marginBottom: 0 }}>
-            Your DPS among the {topDps.length} reference logs (grey):
+            Your {unit} among the {topDps.length} reference logs (grey):
           </p>
-          <DpsStrip you={player.fightDps} others={topDps} />
+          <DpsStrip you={mine} others={topDps} format={format} unit={unit} />
         </>
       )}
     </>
@@ -155,6 +238,15 @@ export default function ProfileView({
   const { status, busy, load, available, rankingCount, columns, logs, reference, playerResults } =
     useBenchmarks(inputs);
   const results = playerResults ?? snapshot.results;
+  const [normalization, setNormalizationState] = useState(readNormalization);
+  const setNormalization = (value: Normalization) => {
+    setNormalizationState(value);
+    try {
+      localStorage.setItem(NORMALIZATION_KEY, JSON.stringify(value));
+    } catch {
+      // Not remembered; it still applies on this page.
+    }
+  };
   const source = profile.source;
   const mistakes = useMemo(
     () =>
@@ -201,7 +293,20 @@ export default function ProfileView({
       >
         {status && <p className="text-muted">{status}</p>}
         {reference ? (
-          <Summary player={snapshot} results={results} reference={reference} mistakes={mistakes} />
+          <>
+            <NormalizationControls
+              value={normalization}
+              onChange={setNormalization}
+              player={snapshot}
+            />
+            <Summary
+              player={snapshot}
+              results={results}
+              reference={reference}
+              mistakes={mistakes}
+              normalization={normalization}
+            />
+          </>
         ) : (
           !benchmarkInputs && (
             <p className="text-muted">
@@ -246,6 +351,7 @@ export default function ProfileView({
               columns={columns}
               topLogs={reference.logs}
               referenceLabel={reference.label}
+              normalization={normalization}
             />
           </Panel>
 

@@ -3,9 +3,10 @@ import { SpellLink } from 'interface';
 import { ReactNode } from 'react';
 
 import { median } from '../benchmarks/aggregate';
-import { CooldownWindowSet, LogSnapshot } from '../metrics/results';
+import { LogSnapshot } from '../metrics/results';
 import { STATUS_COLORS } from './ProfileResultsTable';
 import { CHART_COLORS } from './charts';
+import { damageFactor, headline, hpShare, Normalization } from './normalize';
 import { BenchmarkColumn } from './useBenchmarks';
 
 /** Abilities drawn in each cooldown's chart; the table below lists them all. */
@@ -18,8 +19,22 @@ interface ChartRow {
   reference: Stat;
 }
 
+/** How damage figures are scaled per log and shown: raw (optionally ilvl-adjusted) or % of boss HP. */
+interface Scale {
+  value: (log: LogSnapshot, damage: number) => number;
+  format: (value: number) => string;
+}
+
 /** Paired bars per ability: the player's damage per window above the reference's. */
-function DamageChart({ rows, referenceLabel }: { rows: ChartRow[]; referenceLabel: string }) {
+function DamageChart({
+  rows,
+  referenceLabel,
+  format,
+}: {
+  rows: ChartRow[];
+  referenceLabel: string;
+  format: Scale['format'];
+}) {
   const shown = [...rows]
     .sort(
       (a, b) =>
@@ -43,7 +58,7 @@ function DamageChart({ rows, referenceLabel }: { rows: ChartRow[]; referenceLabe
         }}
       />
       <span className="text-muted" style={{ fontSize: '0.8em', whiteSpace: 'nowrap' }}>
-        {value ? formatNumber(value) : '—'}
+        {value ? format(value) : '—'}
       </span>
     </div>
   );
@@ -74,6 +89,7 @@ function describe(
   referenceLabel: string,
   /** The player's whole-fight DPS as a share of the reference's, for context on gear. */
   dpsShare: number | null,
+  format: Scale['format'],
 ) {
   const total = (pick: (r: ChartRow) => number | null) =>
     rows.reduce((sum, r) => sum + (pick(r) ?? 0), 0);
@@ -97,7 +113,7 @@ function describe(
       {gap > 0 && (
         <>
           {' '}
-          The biggest shortfall is <SpellLink spell={worst.spellId} />: {formatNumber(gap)} less per
+          The biggest shortfall is <SpellLink spell={worst.spellId} />: {format(gap)} less per
           window
           {worst.mine.castsPerWindow !== null &&
             worst.reference.castsPerWindow !== null &&
@@ -123,17 +139,20 @@ interface Stat {
   damagePerWindow: number | null;
 }
 
-function statsFor(snapshots: LogSnapshot[], cooldown: string, ability: string): Stat {
-  const sets = snapshots
-    .map((s) => s.windows.find((set) => set.token === cooldown))
-    .filter((set): set is CooldownWindowSet => set !== undefined && set.windows.length > 0);
-  const perLog = sets.map((set) => {
+function statsFor(snapshots: LogSnapshot[], cooldown: string, ability: string, scale: Scale): Stat {
+  const perLog = snapshots.flatMap((log) => {
+    const set = log.windows.find((w) => w.token === cooldown);
+    if (!set || set.windows.length === 0) {
+      return [];
+    }
     const found = set.abilities.find((a) => a.token === ability);
-    return {
-      castsPerWindow: (found?.casts ?? 0) / set.windows.length,
-      perCast: found && found.casts > 0 ? found.damage / found.casts : null,
-      damagePerWindow: (found?.damage ?? 0) / set.windows.length,
-    };
+    return [
+      {
+        castsPerWindow: (found?.casts ?? 0) / set.windows.length,
+        perCast: found && found.casts > 0 ? scale.value(log, found.damage / found.casts) : null,
+        damagePerWindow: scale.value(log, (found?.damage ?? 0) / set.windows.length),
+      },
+    ];
   });
   return {
     castsPerWindow: median(perLog.map((l) => l.castsPerWindow)),
@@ -146,8 +165,10 @@ function StatCell({
   stat,
   reference,
   uncast,
+  format,
 }: {
   stat: Stat;
+  format: Scale['format'];
   reference?: Stat;
   /** Damage nobody casts directly (melee, procs, Convoke): show damage per window instead. */
   uncast: boolean;
@@ -158,7 +179,7 @@ function StatCell({
     return (
       <td style={{ whiteSpace: 'nowrap' }}>
         <span style={{ color: color(stat.damagePerWindow, reference?.damagePerWindow) }}>
-          {stat.damagePerWindow ? `${formatNumber(stat.damagePerWindow)} / window` : '—'}
+          {stat.damagePerWindow ? `${format(stat.damagePerWindow)} / window` : '—'}
         </span>
       </td>
     );
@@ -170,7 +191,7 @@ function StatCell({
       </span>
       {' × '}
       <span style={{ color: color(stat.perCast, reference?.perCast) }}>
-        {stat.perCast === null ? '—' : formatNumber(stat.perCast)}
+        {stat.perCast === null ? '—' : format(stat.perCast)}
       </span>
     </td>
   );
@@ -186,15 +207,33 @@ export default function CooldownDamage({
   columns,
   topLogs,
   referenceLabel,
+  normalization,
 }: {
   player: LogSnapshot;
   columns: BenchmarkColumn[];
+  normalization: Normalization;
   /** The reference logs (top 10, else #1) the player is flagged against. */
   topLogs: LogSnapshot[];
   referenceLabel: string;
 }) {
-  const referenceDps = median(topLogs.map((log) => log.fightDps).filter((dps) => dps > 0));
-  const dpsShare = referenceDps ? player.fightDps / referenceDps : null;
+  const scale: Scale = normalization.bossHp
+    ? {
+        value: (log, damage) =>
+          hpShare(damage * damageFactor(log, player, normalization), log) ?? 0,
+        format: (value) => `${(value * 100).toFixed(1)}%`,
+      }
+    : {
+        value: (log, damage) => damage * damageFactor(log, player, normalization),
+        format: formatNumber,
+      };
+  const referenceHeadline = median(
+    topLogs
+      .map((log) => headline(log, player, normalization))
+      .filter((v): v is number => v !== null && v > 0),
+  );
+  const mineHeadline = headline(player, player, normalization);
+  const dpsShare =
+    referenceHeadline && mineHeadline !== null ? mineHeadline / referenceHeadline : null;
   const shown = COLUMN_TITLES.map((title) => columns.find((c) => c.title === title)).filter(
     (c): c is BenchmarkColumn => c !== undefined && c.snapshots.length > 0,
   );
@@ -228,8 +267,8 @@ export default function CooldownDamage({
         const chartRows: ChartRow[] = [...rows.entries()].map(([token, spellId]) => ({
           token,
           spellId,
-          mine: statsFor([player], set.token, token),
-          reference: statsFor(topLogs, set.token, token),
+          mine: statsFor([player], set.token, token, scale),
+          reference: statsFor(topLogs, set.token, token, scale),
         }));
 
         return (
@@ -244,8 +283,13 @@ export default function CooldownDamage({
                   chartRows,
                   referenceLabel,
                   dpsShare,
+                  scale.format,
                 )}
-                <DamageChart rows={chartRows} referenceLabel={referenceLabel} />
+                <DamageChart
+                  rows={chartRows}
+                  referenceLabel={referenceLabel}
+                  format={scale.format}
+                />
               </>
             )}
             <details>
@@ -265,8 +309,8 @@ export default function CooldownDamage({
                   </thead>
                   <tbody>
                     {[...rows.entries()].map(([token, spellId]) => {
-                      const reference = statsFor(topLogs, set.token, token);
-                      const mine = statsFor([player], set.token, token);
+                      const reference = statsFor(topLogs, set.token, token, scale);
+                      const mine = statsFor([player], set.token, token, scale);
                       const uncast = !mine.perCast && !reference.perCast;
                       return (
                         <tr key={token}>
@@ -277,12 +321,14 @@ export default function CooldownDamage({
                             stat={mine}
                             reference={topLogs.length > 0 ? reference : undefined}
                             uncast={uncast}
+                            format={scale.format}
                           />
                           {shown.map((column) => (
                             <StatCell
                               key={column.title}
-                              stat={statsFor(column.snapshots, set.token, token)}
+                              stat={statsFor(column.snapshots, set.token, token, scale)}
                               uncast={uncast}
+                              format={scale.format}
                             />
                           ))}
                         </tr>

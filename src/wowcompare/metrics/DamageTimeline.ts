@@ -1,5 +1,5 @@
 import Analyzer, { Options, SELECTED_PLAYER, SELECTED_PLAYER_PET } from 'parser/core/Analyzer';
-import Events, { CastEvent, DamageEvent } from 'parser/core/Events';
+import Events, { CastEvent, DamageEvent, ResourceActor } from 'parser/core/Events';
 
 /**
  * Records the player's (and pets') damage to enemies, and the player's casts, so window metrics
@@ -17,6 +17,8 @@ class DamageTimeline extends Analyzer {
   }[] = [];
   /** In-game names of every spell seen in `damage` and `casts`. */
   readonly names = new Map<number, string>();
+  /** The largest enemy max HP the player hit: the boss, for "damage as a share of boss HP". */
+  maxEnemyHp = 0;
 
   constructor(options: Options) {
     super(options);
@@ -45,6 +47,9 @@ class DamageTimeline extends Analyzer {
       return;
     }
     this.names.set(event.ability.guid, event.ability.name);
+    if (event.maxHitPoints && event.resourceActor !== ResourceActor.Source) {
+      this.maxEnemyHp = Math.max(this.maxEnemyHp, event.maxHitPoints);
+    }
     this.damage.push({
       timestamp: event.timestamp,
       amount: event.amount + (event.absorbed ?? 0),

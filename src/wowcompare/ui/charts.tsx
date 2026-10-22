@@ -130,7 +130,17 @@ export function StatTile({
  * Where the player's DPS falls among the reference logs: one dot per log, the player as a gold
  * marker with its value labelled, on a shared axis.
  */
-export function DpsStrip({ you, others }: { you: number; others: number[] }) {
+export function DpsStrip({
+  you,
+  others,
+  format = formatNumber,
+  unit = 'DPS',
+}: {
+  you: number;
+  others: number[];
+  format?: (value: number) => string;
+  unit?: string;
+}) {
   const width = 600;
   const height = 54;
   const pad = 30;
@@ -145,7 +155,7 @@ export function DpsStrip({ you, others }: { you: number; others: number[] }) {
       width="100%"
       style={{ maxWidth: width, display: 'block' }}
       role="img"
-      aria-label={`Your DPS ${formatNumber(you)} among the top logs`}
+      aria-label={`Your ${unit} ${format(you)} among the top logs`}
     >
       <line x1={pad} x2={width - pad} y1={axisY} y2={axisY} stroke={CHART_COLORS.band} />
       {others.map((v, i) => (
@@ -158,7 +168,9 @@ export function DpsStrip({ you, others }: { you: number; others: number[] }) {
           stroke="#222"
           strokeWidth={2}
         >
-          <title>{formatNumber(v)} DPS</title>
+          <title>
+            {format(v)} {unit}
+          </title>
         </circle>
       ))}
       <path
@@ -167,13 +179,15 @@ export function DpsStrip({ you, others }: { you: number; others: number[] }) {
         stroke="#222"
         strokeWidth={2}
       >
-        <title>You: {formatNumber(you)} DPS</title>
+        <title>
+          You: {format(you)} {unit}
+        </title>
       </path>
       <text x={x(you)} y={12} textAnchor="middle" fontSize={12} fill="currentColor">
-        You {formatNumber(you)}
+        You {format(you)}
       </text>
       <text x={pad} y={height - 2} fontSize={11} fill="currentColor" opacity={0.6}>
-        {formatNumber(lo)}
+        {format(lo)}
       </text>
       <text
         x={width - pad}
@@ -183,7 +197,7 @@ export function DpsStrip({ you, others }: { you: number; others: number[] }) {
         opacity={0.6}
         textAnchor="end"
       >
-        {formatNumber(hi)}
+        {format(hi)}
       </text>
     </svg>
   );

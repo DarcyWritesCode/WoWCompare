@@ -213,6 +213,10 @@ export interface LogSnapshot {
   comp: RaidComp;
   windows: CooldownWindowSet[];
   fightDps: number;
+  /** Average equipped item level. */
+  ilvl?: number;
+  /** The boss's max HP (the largest enemy the player hit). */
+  bossHp?: number;
 }
 
 /**

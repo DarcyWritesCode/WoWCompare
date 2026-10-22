@@ -191,6 +191,8 @@ class ProfileMetrics extends Analyzer {
       comp,
       windows: this.cooldownMetrics.active ? this.cooldownMetrics.windowTimelines() : [],
       fightDps: durationMs > 0 ? (damage / durationMs) * 1000 : 0,
+      ilvl: this.selectedCombatant.ilvl,
+      bossHp: this.damageTimeline.maxEnemyHp || undefined,
     };
   }
 
