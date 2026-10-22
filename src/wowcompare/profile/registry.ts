@@ -1,30 +1,31 @@
 import { buildProfile, BuiltProfile } from '../simc/buildProfile';
 import { fetchLiveApl } from '../simc/source';
-import druidFeral from '../simc/specs/druidFeral';
+import { getAdapter } from '../simc/specs';
 import { SpecAdapter } from '../simc/specs/types';
 import { Profile } from './types';
 
-const adapters: SpecAdapter[] = [druidFeral];
+/** Bundled APL snapshots, loaded only when the live copy can't be fetched. */
+const bundledApls = import.meta.glob<string>('../simc/bundled/*.simc', {
+  query: '?raw',
+  import: 'default',
+});
 
 const built = new Map<number, BuiltProfile>();
 const overrides = new Map<number, Profile>();
-const liveLoads = new Map<number, Promise<void>>();
-
-function bundled(adapter: SpecAdapter): BuiltProfile {
-  return buildProfile(adapter, adapter.bundledApl, {
-    kind: 'simc',
-    file: adapter.simcFile,
-    url: aplUrl(adapter),
-    live: false,
-  });
-}
+const loads = new Map<number, Promise<void>>();
 
 export const aplUrl = (adapter: SpecAdapter) =>
   `https://raw.githubusercontent.com/simulationcraft/simc/midnight/ActionPriorityLists/default/${adapter.simcFile}.simc`;
 
+/** Whether SimC publishes a default APL for this spec (most healers have none). */
+export function hasSimcApl(specId: number): boolean {
+  const adapter = getAdapter(specId);
+  return adapter !== undefined && `../simc/bundled/${adapter.simcFile}.simc` in bundledApls;
+}
+
 /**
  * The profile analyzers should use for `specId`: an explicit selection, else the one built from
- * the live SimC APL if it has loaded (see `loadLiveProfile`), else the bundled APL snapshot.
+ * the spec's SimC APL. Undefined until `loadProfile` has finished, or if the spec has no APL.
  */
 export function getProfile(specId: number): Profile | undefined {
   return getBuiltProfile(specId)?.profile;
@@ -32,20 +33,7 @@ export function getProfile(specId: number): Profile | undefined {
 
 export function getBuiltProfile(specId: number): BuiltProfile | undefined {
   const override = overrides.get(specId);
-  if (override) {
-    return { profile: override, unresolved: [] };
-  }
-  const existing = built.get(specId);
-  if (existing) {
-    return existing;
-  }
-  const adapter = adapters.find((a) => a.specId === specId);
-  if (!adapter) {
-    return undefined;
-  }
-  const result = bundled(adapter);
-  built.set(specId, result);
-  return result;
+  return override ? { profile: override, unresolved: [] } : built.get(specId);
 }
 
 /** Select a profile (e.g. one sent to a parse worker) for its spec; `null` clears it. */
@@ -57,34 +45,36 @@ export function setProfile(specId: number, profile: Profile | null) {
   }
 }
 
+async function load(adapter: SpecAdapter) {
+  const url = aplUrl(adapter);
+  const source = { kind: 'simc' as const, file: adapter.simcFile, url };
+  const live = await fetchLiveApl(url);
+  if (live) {
+    built.set(
+      adapter.specId,
+      buildProfile(adapter, live.text, { ...source, live: true, retrievedAt: live.retrievedAt }),
+    );
+    return;
+  }
+  const bundled = bundledApls[`../simc/bundled/${adapter.simcFile}.simc`];
+  if (bundled) {
+    built.set(adapter.specId, buildProfile(adapter, await bundled(), { ...source, live: false }));
+  }
+}
+
 /**
- * Fetches the spec's current SimC APL and rebuilds its profile from it. Never rejects: on any
- * failure the bundled snapshot stays in use. Runs once per session per spec.
+ * Builds the spec's profile from its current SimC APL (falling back to the bundled snapshot).
+ * Never rejects; runs once per session per spec.
  */
-export function loadLiveProfile(specId: number): Promise<void> {
-  const adapter = adapters.find((a) => a.specId === specId);
-  if (!adapter) {
+export function loadProfile(specId: number): Promise<void> {
+  const adapter = getAdapter(specId);
+  if (!adapter || !hasSimcApl(specId)) {
     return Promise.resolve();
   }
-  let load = liveLoads.get(specId);
-  if (!load) {
-    load = fetchLiveApl(aplUrl(adapter))
-      .then((apl) => {
-        if (apl) {
-          built.set(
-            specId,
-            buildProfile(adapter, apl.text, {
-              kind: 'simc',
-              file: adapter.simcFile,
-              url: aplUrl(adapter),
-              live: true,
-              retrievedAt: apl.retrievedAt,
-            }),
-          );
-        }
-      })
-      .catch((err) => console.warn('SimC APL profile failed, using the bundled APL', err));
-    liveLoads.set(specId, load);
+  let pending = loads.get(specId);
+  if (!pending) {
+    pending = load(adapter).catch((err) => console.warn('Building the SimC profile failed', err));
+    loads.set(specId, pending);
   }
-  return load;
+  return pending;
 }

@@ -109,7 +109,7 @@ function isDisabled(action: AplAction, disabled: Set<string>): boolean {
 }
 
 /** Lists only run on multiple targets; their dots aren't single-target uptime goals. */
-const isAoeList = (list: string) => list.startsWith('aoe');
+const isAoeList = (list: string) => /aoe|cleave/i.test(list);
 
 /** Which cooldowns, procs and dots an APL tracks, as SimC tokens (resolved to spells later). */
 export function summarizeApl(text: string): AplSummary {
@@ -219,14 +219,19 @@ export function summarizeApl(text: string): AplSummary {
     consumers: [...set],
   }));
 
-  // Dots: actions the APL refreshes (`refreshable`), outside AoE-only lists.
+  // Dots: actions the APL refreshes based on their own duration (`refreshable`, bare `remains` /
+  // `ticking`, or `dot.<self>.*`), outside AoE-only lists.
   const dotTokens = new Set<string>();
   for (const action of actions) {
     if (isAoeList(action.list) || META_ACTIONS.has(action.name)) {
       continue;
     }
     const conditions = `${action.options.if ?? ''} ${action.options.target_if ?? ''}`;
-    if (/(^|[^.a-z_])refreshable\b/.test(conditions)) {
+    const selfDot = new RegExp(`(^|[^a-z0-9_.])dot\\.${action.name}\\.`);
+    if (
+      /(^|[^.a-z0-9_])(refreshable|remains|ticking)\b/.test(conditions) ||
+      selfDot.test(conditions)
+    ) {
       dotTokens.add(action.name);
     }
   }

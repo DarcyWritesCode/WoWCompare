@@ -17,7 +17,7 @@ export function parseApl(text: string): AplAction[] {
   const actions: AplAction[] = [];
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    const match = /^actions(?:\.([a-z0-9_]+))?\+?=\/?(.+)$/.exec(line);
+    const match = /^actions(?:\.([A-Za-z0-9_]+))?\+?=\/?(.+)$/.exec(line);
     if (!match) {
       continue;
     }

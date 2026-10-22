@@ -8,8 +8,6 @@ export interface SpecAdapter {
   specId: number;
   /** File name under SimC's `ActionPriorityLists/default/`, without `.simc`. */
   simcFile: string;
-  /** Snapshot of the APL shipped with the app, used when the live copy can't be fetched. */
-  bundledApl: string;
   /** Spell tables searched for SimC tokens. */
   tables: Record<string, Spell>[];
   aliases: AliasTable;
@@ -22,3 +20,6 @@ export interface SpecAdapter {
   windowMs?: Record<string, number>;
   heroTrees?: HeroTree[];
 }
+
+/** Per-spec fixes layered over the generic adapter. */
+export type SpecOverrides = Partial<Omit<SpecAdapter, 'specId' | 'simcFile'>>;

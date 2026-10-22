@@ -106,7 +106,11 @@ class CooldownMetrics extends Analyzer {
   /** Each applicable cooldown's windows as plain data, for the window timelines. */
   windowTimelines(): CooldownWindowSet[] {
     return this.entries
-      .filter((entry) => this.abilities.getAbility(entry.spellId) !== undefined)
+      .filter(
+        (entry) =>
+          this.abilities.getAbility(entry.spellId) !== undefined ||
+          (this.casts.get(entry.spellId)?.length ?? 0) > 0,
+      )
       .map((entry) => ({
         spellId: entry.spellId,
         rank: entry.rank,
@@ -157,8 +161,11 @@ class CooldownMetrics extends Analyzer {
 
     return this.entries.map((entry) => {
       const metrics: RawEntryMetrics['metrics'] = {};
-      // Abilities only lists spells the player actually has (talents, hero tree).
-      const applicable = this.abilities.getAbility(entry.spellId) !== undefined;
+      // Abilities only lists spells the player has (talents, hero tree), but a spec's ability
+      // list can miss spells or use other IDs, so a spell that was actually cast also counts.
+      const applicable =
+        this.abilities.getAbility(entry.spellId) !== undefined ||
+        (this.casts.get(entry.spellId)?.length ?? 0) > 0;
       if (!applicable) {
         return { spellId: entry.spellId, kind: entry.kind, applicable, metrics };
       }

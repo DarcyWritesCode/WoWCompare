@@ -1,3 +1,4 @@
+import ROLES from 'game/ROLES';
 import { Panel } from 'interface';
 import Analyzer, { Options } from 'parser/core/Analyzer';
 
@@ -59,7 +60,7 @@ class ProfileMetrics extends Analyzer {
         difficulty: fight.difficulty,
         className: config.spec.wclClassName,
         specName: config.spec.wclSpecName,
-        metric: 'dps' as const,
+        metric: config.spec.role === ROLES.HEALER ? ('hps' as const) : ('dps' as const),
       },
       player: {
         ilvl: Math.round(this.selectedCombatant.ilvl ?? 0),

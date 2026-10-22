@@ -1,9 +1,7 @@
 import SPELLS_DRUID from 'common/SPELLS/druid';
 import { TALENTS_DRUID } from 'common/TALENTS';
-import SPECS from 'game/SPECS';
 
-import bundledApl from '../bundled/druid_feral.simc?raw';
-import { SpecAdapter } from './types';
+import { SpecOverrides } from './types';
 
 const BERSERK_OR_INCARNATION = [
   SPELLS_DRUID.BERSERK_CAT.id,
@@ -11,11 +9,7 @@ const BERSERK_OR_INCARNATION = [
 ];
 
 /** How Feral's SimC APL tokens map onto this codebase's spells. */
-const druidFeral: SpecAdapter = {
-  specId: SPECS.FERAL_DRUID.id,
-  simcFile: 'druid_feral',
-  bundledApl,
-  tables: [SPELLS_DRUID, TALENTS_DRUID],
+const druidFeral: SpecOverrides = {
   aliases: {
     // SimC's "whichever of Berserk / Incarnation you have"; the `berserk` action is both too.
     bs_inc: { action: BERSERK_OR_INCARNATION },

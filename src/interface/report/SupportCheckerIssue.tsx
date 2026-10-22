@@ -16,6 +16,7 @@ import Report from 'parser/core/Report';
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLingui } from '@lingui/react';
+import { hasSimcApl } from 'wowcompare/profile/registry';
 
 interface Props {
   report: Report;
@@ -99,6 +100,22 @@ const SupportCheckerIssue = ({
                 </Trans>
               </Link>
             </Tooltip>
+            {/* WoWCompare: the Profile tab is built from the spec's live SimC APL, so it doesn't
+                depend on this spec's (possibly outdated) analysis. */}
+            {hasSimcApl(spec.id) && (
+              <>
+                {/* oxlint-disable-next-line wowanalyzer/no-br -- matches the layout above */}
+                <br />
+                <Link
+                  to={makeAnalyzerUrl(report, fight.id, player.id, 'profile', build)}
+                  onClick={onContinueAnyway}
+                  style={{ fontSize: '1.2em' }}
+                >
+                  <Icon icon="inv_misc_book_09" /> Go to the Profile tab (built from SimC's current
+                  APL, so it stays up to date)
+                </Link>
+              </>
+            )}
           </div>
           <div className="flex-sub">
             <img
