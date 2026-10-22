@@ -111,6 +111,13 @@ export default defineConfig((env) => ({
   server: {
     open: true,
     port: 3000,
+    // Comma-separated extra hostnames the dev server answers to (e.g. a reverse proxy name).
+    allowedHosts: process.env.DEV_ALLOWED_HOSTS?.split(',') ?? [],
+    // The WoWAnalyzer server only allows CORS from localhost, so proxy its API through the dev
+    // server to keep requests same-origin when the app is opened under another hostname.
+    proxy: {
+      '/i/': { target: 'https://wowanalyzer.com', changeOrigin: true },
+    },
     watch: {
       ignored: ['**/.direnv/**'],
     },
