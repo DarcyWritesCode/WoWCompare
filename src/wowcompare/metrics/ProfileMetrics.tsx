@@ -3,13 +3,12 @@ import Analyzer, { Options } from 'parser/core/Analyzer';
 
 import { getProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
-import BenchmarkComparison from '../ui/BenchmarkComparison';
-import ProfileResultsTable from '../ui/ProfileResultsTable';
+import ProfileView from '../ui/ProfileView';
 import BuffMetrics from './BuffMetrics';
 import ConditionRules from './ConditionRules';
 import CooldownMetrics from './CooldownMetrics';
 import DamageTimeline from './DamageTimeline';
-import { ProfileResults, scoreProfile } from './results';
+import { LogSnapshot, ProfileResults, scoreProfile } from './results';
 
 /** Combines the metric modules into one scored, serializable result for the selected profile. */
 class ProfileMetrics extends Analyzer {
@@ -22,6 +21,7 @@ class ProfileMetrics extends Analyzer {
   protected buffMetrics!: BuffMetrics;
   protected cooldownMetrics!: CooldownMetrics;
   protected conditionRules!: ConditionRules;
+  protected damageTimeline!: DamageTimeline;
 
   private readonly profile: Profile | undefined;
 
@@ -70,9 +70,24 @@ class ProfileMetrics extends Analyzer {
     };
   }
 
-  tab() {
+  /** Results plus window timelines: everything this log contributes to a comparison. */
+  snapshot(): LogSnapshot | null {
     const results = this.results();
-    if (!results || !this.profile) {
+    if (!results) {
+      return null;
+    }
+    const damage = this.damageTimeline.damage.reduce((sum, d) => sum + d.amount, 0);
+    const durationMs = this.owner.fight.end_time - this.owner.fight.start_time;
+    return {
+      results,
+      windows: this.cooldownMetrics.active ? this.cooldownMetrics.windowTimelines() : [],
+      fightDps: durationMs > 0 ? (damage / durationMs) * 1000 : 0,
+    };
+  }
+
+  tab() {
+    const snapshot = this.snapshot();
+    if (!snapshot || !this.profile) {
       return;
     }
     return {
@@ -82,13 +97,7 @@ class ProfileMetrics extends Analyzer {
         <Panel
           title={`${this.profile!.name} (v${this.profile!.version}, patch ${this.profile!.patch})`}
         >
-          <ProfileResultsTable results={results} />
-          {this.benchmarkProps && (
-            <>
-              <h2>Benchmarks</h2>
-              <BenchmarkComparison {...this.benchmarkProps} playerResults={results} />
-            </>
-          )}
+          <ProfileView snapshot={snapshot} benchmarkInputs={this.benchmarkProps} />
         </Panel>
       ),
     };

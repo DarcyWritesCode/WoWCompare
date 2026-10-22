@@ -101,3 +101,39 @@ export function scoreProfile(
 
   return { profileId: profile.id, profileVersion: profile.version, entries, rules };
 }
+
+export interface WindowCast {
+  /** ms from the timeline's start (window start minus padding). */
+  offsetMs: number;
+  spellId: number;
+}
+
+/** One cooldown window as plain data, for the window timelines. */
+export interface CooldownWindow {
+  /** Window start, ms from fight start. */
+  startMs: number;
+  durationMs: number;
+  /** Context shown before and after the window, ms (shorter at the fight's edges). */
+  leadMs: number;
+  trailMs: number;
+  bucketMs: number;
+  /** DPS per bucket from `startMs - leadMs` to `startMs + durationMs + trailMs`. */
+  buckets: number[];
+  /** DPS inside the window itself. */
+  dps: number;
+  casts: WindowCast[];
+}
+
+export interface CooldownWindowSet {
+  spellId: number;
+  rank: number;
+  label?: string;
+  windows: CooldownWindow[];
+}
+
+/** Everything a parsed log contributes to the comparison. */
+export interface LogSnapshot {
+  results: ProfileResults;
+  windows: CooldownWindowSet[];
+  fightDps: number;
+}

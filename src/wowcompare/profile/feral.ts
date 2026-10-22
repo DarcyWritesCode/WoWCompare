@@ -13,7 +13,7 @@ const FERAL_STARTER_PROFILE: Profile = {
   name: 'Feral starter profile',
   specId: SPECS.FERAL_DRUID.id,
   patch: '12.0.5',
-  version: 1,
+  version: 2, // v2: Bloodtalons removed (not in Midnight)
   entries: [
     {
       spellId: SPELLS.RIP.id,
@@ -44,17 +44,9 @@ const FERAL_STARTER_PROFILE: Profile = {
       thresholds: { uptime: { pass: 0.9, warn: 0.8 } },
     },
     {
-      spellId: SPELLS.BLOODTALONS_BUFF.id,
-      kind: 'buff',
-      rank: 5,
-      metrics: ['procUsage'],
-      consumerSpellIds: [SPELLS.RIP.id, SPELLS.FEROCIOUS_BITE.id, SPELLS.RAKE.id],
-      thresholds: { procUsage: { pass: 0.9, warn: 0.75 } },
-    },
-    {
       spellId: SPELLS.APEX_PREDATORS_CRAVING_BUFF.id,
       kind: 'buff',
-      rank: 6,
+      rank: 5,
       metrics: ['procUsage'],
       consumerSpellIds: [SPELLS.FEROCIOUS_BITE.id],
       thresholds: { procUsage: { pass: 0.95, warn: 0.85 } },
@@ -62,7 +54,7 @@ const FERAL_STARTER_PROFILE: Profile = {
     {
       spellId: SPELLS.CLEARCASTING_FERAL.id,
       kind: 'buff',
-      rank: 7,
+      rank: 6,
       metrics: ['procUsage'],
       consumerSpellIds: [SPELLS.SHRED.id, SPELLS.SWIPE_CAT.id],
       thresholds: { procUsage: { pass: 0.9, warn: 0.8 } },
@@ -70,7 +62,7 @@ const FERAL_STARTER_PROFILE: Profile = {
     {
       spellId: TALENTS_DRUID.CONVOKE_THE_SPIRITS_TALENT.id,
       kind: 'cooldown',
-      rank: 8,
+      rank: 7,
       metrics: ['cooldownUsage', 'windowDps'],
       windowMs: 4_000,
       thresholds: { cooldownUsage: { pass: 0.9, warn: 0.75 } },

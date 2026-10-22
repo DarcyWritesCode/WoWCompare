@@ -7,7 +7,11 @@ import { getProfile } from '../profile/registry';
 import { Profile, ProfileEntry } from '../profile/types';
 import DamageTimeline from './DamageTimeline';
 import { Interval, mergeIntervals, windowThroughput } from './intervals';
-import { RawEntryMetrics } from './results';
+import { CooldownWindow, CooldownWindowSet, RawEntryMetrics } from './results';
+
+/** Context shown around each window in the timelines. */
+const WINDOW_PADDING_MS = 3_000;
+const BUCKET_MS = 1_000;
 
 export interface CooldownUsage {
   casts: number;
@@ -97,6 +101,54 @@ class CooldownMetrics extends Analyzer {
       this.owner.fight.start_time,
       end,
     );
+  }
+
+  /** Each applicable cooldown's windows as plain data, for the window timelines. */
+  windowTimelines(): CooldownWindowSet[] {
+    return this.entries
+      .filter((entry) => this.abilities.getAbility(entry.spellId) !== undefined)
+      .map((entry) => ({
+        spellId: entry.spellId,
+        rank: entry.rank,
+        label: entry.label,
+        windows: this.windows(entry).map((window) => this.timeline(window)),
+      }));
+  }
+
+  private timeline(window: Interval): CooldownWindow {
+    const fightStart = this.owner.fight.start_time;
+    const from = Math.max(fightStart, window.start - WINDOW_PADDING_MS);
+    const to = Math.min(this.owner.fight.end_time, window.end + WINDOW_PADDING_MS);
+
+    const buckets = new Array<number>(Math.max(1, Math.ceil((to - from) / BUCKET_MS))).fill(0);
+    let inside = 0;
+    for (const { timestamp, amount } of this.damageTimeline.damage) {
+      if (timestamp < from || timestamp >= to) {
+        continue;
+      }
+      buckets[Math.floor((timestamp - from) / BUCKET_MS)] += amount;
+      if (timestamp >= window.start && timestamp < window.end) {
+        inside += amount;
+      }
+    }
+    // Damage per bucket to DPS; the last bucket may be partial.
+    const dps = buckets.map((amount, i) => {
+      const length = Math.min(BUCKET_MS, to - from - i * BUCKET_MS);
+      return length > 0 ? (amount / length) * 1000 : 0;
+    });
+
+    return {
+      startMs: window.start - fightStart,
+      durationMs: window.end - window.start,
+      leadMs: window.start - from,
+      trailMs: to - window.end,
+      bucketMs: BUCKET_MS,
+      buckets: dps,
+      dps: window.end > window.start ? (inside / (window.end - window.start)) * 1000 : 0,
+      casts: this.damageTimeline.casts
+        .filter((cast) => cast.timestamp >= from && cast.timestamp < to)
+        .map((cast) => ({ offsetMs: cast.timestamp - from, spellId: cast.spellId })),
+    };
   }
 
   results(): RawEntryMetrics[] {

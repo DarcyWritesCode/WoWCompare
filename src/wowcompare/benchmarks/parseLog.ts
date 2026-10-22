@@ -9,7 +9,7 @@ import { PlayerDetails } from 'parser/core/Player';
 import Report from 'parser/core/Report';
 
 import ProfileMetrics from '../metrics/ProfileMetrics';
-import { ProfileResults } from '../metrics/results';
+import { LogSnapshot } from '../metrics/results';
 
 export interface LogRef {
   reportCode: string;
@@ -21,11 +21,11 @@ export interface LogRef {
 /** Events processed between yields to the browser, so the page stays responsive. */
 const BATCH_SIZE = 5000;
 
-const cache = new Map<string, Promise<ProfileResults | null>>();
+const cache = new Map<string, Promise<LogSnapshot | null>>();
 
 const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-async function parse(config: Config, ref: LogRef): Promise<ProfileResults | null> {
+async function parse(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
   const report: Report = {
     ...(await fetchFights(ref.reportCode)),
     code: ref.reportCode,
@@ -77,14 +77,14 @@ async function parse(config: Config, ref: LogRef): Promise<ProfileResults | null
     }
   }
   parser.finish();
-  return parser.getModule(ProfileMetrics)?.results() ?? null;
+  return parser.getModule(ProfileMetrics)?.snapshot() ?? null;
 }
 
 /**
  * Runs one benchmark log through the same parser and profile metrics as the analyzed log.
  * Results are cached for the session (Phase 5 moves this to a shared Supabase cache).
  */
-export function parseBenchmarkLog(config: Config, ref: LogRef): Promise<ProfileResults | null> {
+export function parseBenchmarkLog(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
   const key = `${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
   let result = cache.get(key);
   if (!result) {
