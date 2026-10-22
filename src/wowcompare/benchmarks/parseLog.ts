@@ -13,6 +13,7 @@ import { LogSnapshot } from '../metrics/results';
 import { setProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
 import type { ParseRequest, ParseResponse } from './parseWorker';
+import { getCachedSnapshot, putCachedSnapshot, snapshotKey } from './snapshotCache';
 
 export interface LogRef {
   reportCode: string;
@@ -199,9 +200,27 @@ function parseInWorker(config: Config, profile: Profile, ref: LogRef): Promise<L
   });
 }
 
+/** The shared server cache first; otherwise parse here and share the result for the next viewer. */
+async function fromServerOrParse(
+  config: Config,
+  profile: Profile,
+  ref: LogRef,
+): Promise<LogSnapshot | null> {
+  const key = snapshotKey(profile, ref);
+  const cached = await getCachedSnapshot(key);
+  if (cached) {
+    return cached;
+  }
+  const snapshot = await parseInWorker(config, profile, ref);
+  if (snapshot) {
+    putCachedSnapshot(key, snapshot);
+  }
+  return snapshot;
+}
+
 /**
  * Runs one benchmark log through the same parser and profile as the analyzed log, in a
- * Web Worker. Results are cached for the session (Phase 5 moves this to a shared Supabase cache).
+ * Web Worker, unless the shared server cache has it. Results are also kept for the session.
  */
 export function parseBenchmarkLog(
   config: Config,
@@ -211,7 +230,7 @@ export function parseBenchmarkLog(
   const key = `${profile.id}@${profile.version}:${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
   let result = cache.get(key);
   if (!result) {
-    result = parseInWorker(config, profile, ref);
+    result = fromServerOrParse(config, profile, ref);
     result.catch(() => cache.delete(key));
     cache.set(key, result);
   }

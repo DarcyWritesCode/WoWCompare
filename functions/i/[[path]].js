@@ -3,6 +3,8 @@
 // briefly so repeat views of a report don't hit WoWAnalyzer again.
 const UPSTREAM = 'https://wowanalyzer.com';
 const CACHE_SECONDS = 300;
+/** Rankings move slowly; keep them for a day like the parsed-log cache. */
+const RANKINGS_CACHE_SECONDS = 24 * 60 * 60;
 
 export async function onRequest({ request }) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -12,7 +14,10 @@ export async function onRequest({ request }) {
   const upstream = await fetch(`${UPSTREAM}${url.pathname}${url.search}`, {
     method: request.method,
     headers: { accept: request.headers.get('accept') ?? '*/*' },
-    cf: { cacheTtl: CACHE_SECONDS, cacheEverything: true },
+    cf: {
+      cacheTtl: url.pathname.includes('/rankings/') ? RANKINGS_CACHE_SECONDS : CACHE_SECONDS,
+      cacheEverything: true,
+    },
   });
   const headers = new Headers(upstream.headers);
   headers.delete('set-cookie');
