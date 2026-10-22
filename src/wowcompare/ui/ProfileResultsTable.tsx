@@ -3,7 +3,7 @@ import { SpellLink } from 'interface';
 
 import { MetricKind } from '../profile/types';
 import { LogSnapshot, ProfileResults, ScoredMetric, Status } from '../metrics/results';
-import { CompareBar, CompareLegend } from './charts';
+import { CompareBar, CompareLegend, tint } from './charts';
 
 export const METRIC_ORDER: MetricKind[] = ['uptime', 'procUsage', 'cooldownUsage', 'windowDps'];
 
@@ -58,7 +58,7 @@ function MetricCell({
   const bar = comparison && kind !== 'windowDps' && metric.value !== null;
   return (
     <td style={{ whiteSpace: 'nowrap' }} title={describeDetail(metric.detail)}>
-      <span style={{ color, display: 'inline-block', minWidth: 44 }}>
+      <span style={{ ...tint(color), display: 'inline-block', minWidth: 44 }}>
         {formatValue(kind, metric.value)}
       </span>
       {bar && (
@@ -168,7 +168,7 @@ export default function ProfileResultsTable({
               <tr key={rule.ruleId}>
                 <td>{rule.rule.rank}</td>
                 <td>{rule.rule.description}</td>
-                <td style={{ color: STATUS_COLORS[rule.status] }}>
+                <td style={tint(STATUS_COLORS[rule.status])}>
                   {rule.casts === 0
                     ? 'no casts'
                     : `${rule.passed} / ${rule.casts} (${formatValue('rule', rule.value)})`}

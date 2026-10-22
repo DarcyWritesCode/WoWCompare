@@ -4,6 +4,7 @@ import { LogSnapshot, ScoredMetric, ScoredRule } from '../metrics/results';
 import { MetricKind } from '../profile/types';
 import { formatValue, METRIC_LABELS, METRIC_ORDER, STATUS_COLORS } from './ProfileResultsTable';
 import { describeComp } from './build';
+import { tint } from './charts';
 import { BenchmarkColumn } from './useBenchmarks';
 
 /** The player's results beside the five benchmark columns, one row per entry metric and rule. */
@@ -40,7 +41,7 @@ export default function BenchmarkTable({
     const entry = column.results?.entries[entryIndex];
     const metric: ScoredMetric | undefined = entry?.applicable ? entry.metrics[kind] : undefined;
     return (
-      <td key={column.title} style={{ color: metric ? STATUS_COLORS[metric.status] : undefined }}>
+      <td key={column.title} style={tint(metric ? STATUS_COLORS[metric.status] : undefined)}>
         {metric ? formatValue(kind, metric.value) : '—'}
       </td>
     );
@@ -49,7 +50,7 @@ export default function BenchmarkTable({
   const ruleCell = (column: BenchmarkColumn, ruleIndex: number) => {
     const rule: ScoredRule | undefined = column.results?.rules[ruleIndex];
     return (
-      <td key={column.title} style={{ color: rule ? STATUS_COLORS[rule.status] : undefined }}>
+      <td key={column.title} style={tint(rule ? STATUS_COLORS[rule.status] : undefined)}>
         {rule ? formatValue('rule', rule.value) : '—'}
       </td>
     );

@@ -1,6 +1,6 @@
 import { formatDuration, formatNumber } from 'common/format';
 import { Panel } from 'interface';
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
@@ -88,6 +88,24 @@ function NormalizationControls({
       ))}
     </div>
   );
+}
+
+/** Opens every collapsed section while printing, so the PDF has the full tables. */
+function useOpenDetailsForPrint() {
+  useEffect(() => {
+    let opened: HTMLDetailsElement[] = [];
+    const before = () => {
+      opened = [...document.querySelectorAll<HTMLDetailsElement>('details:not([open])')];
+      opened.forEach((details) => (details.open = true));
+    };
+    const after = () => opened.forEach((details) => (details.open = false));
+    window.addEventListener('beforeprint', before);
+    window.addEventListener('afterprint', after);
+    return () => {
+      window.removeEventListener('beforeprint', before);
+      window.removeEventListener('afterprint', after);
+    };
+  }, []);
 }
 
 /** Scored metrics and rules by status, for the "on par" tile. */
@@ -238,6 +256,7 @@ export default function ProfileView({
   const { status, busy, load, available, rankingCount, columns, logs, reference, playerResults } =
     useBenchmarks(inputs);
   const results = playerResults ?? snapshot.results;
+  useOpenDetailsForPrint();
   const [normalization, setNormalizationState] = useState(readNormalization);
   const setNormalization = (value: Normalization) => {
     setNormalizationState(value);
@@ -262,7 +281,7 @@ export default function ProfileView({
         <button
           key={kind}
           type="button"
-          className="btn btn-default btn-sm"
+          className="btn btn-default btn-sm hidden-print"
           style={{ marginLeft: 8, marginBottom: 4 }}
           disabled={busy}
           onClick={() => load(kind)}

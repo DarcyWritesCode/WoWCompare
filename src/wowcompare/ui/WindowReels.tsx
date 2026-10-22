@@ -79,7 +79,7 @@ function WindowCard({ index, window, fightDps, maxDps }: CardProps) {
   const slot = x(window.bucketMs);
 
   return (
-    <div style={{ flex: '0 0 auto', width }}>
+    <div className="wc-avoid-break" style={{ flex: '0 0 auto', width }}>
       <div style={{ fontSize: '0.85em', whiteSpace: 'nowrap' }}>
         <strong>#{index + 1}</strong> at {formatDuration(window.startMs)} ·{' '}
         {(window.durationMs / 1000).toFixed(1)}s
@@ -106,8 +106,14 @@ function WindowCard({ index, window, fightDps, maxDps }: CardProps) {
             />
           </clipPath>
         </defs>
-        <path d={area} fill={COLORS.outsideFill} />
-        <path d={line} fill="none" stroke={COLORS.outside} strokeWidth={2} />
+        <path className="wc-reel-outside-fill" d={area} fill={COLORS.outsideFill} />
+        <path
+          className="wc-reel-outside"
+          d={line}
+          fill="none"
+          stroke={COLORS.outside}
+          strokeWidth={2}
+        />
         <g clipPath={`url(#${clipId})`}>
           <path d={area} fill={COLORS.inWindowFill} />
           <path d={line} fill="none" stroke={COLORS.inWindow} strokeWidth={2} />
@@ -132,6 +138,7 @@ function WindowCard({ index, window, fightDps, maxDps }: CardProps) {
           x2={width}
           y1={y(fightDps)}
           y2={y(fightDps)}
+          className="wc-reel-average"
           stroke={COLORS.average}
           strokeDasharray="4 3"
         >
@@ -171,7 +178,10 @@ function Reel({
       {!set || set.windows.length === 0 ? (
         <div className="text-muted">No windows.</div>
       ) : (
-        <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8 }}>
+        <div
+          className="wc-reel"
+          style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8 }}
+        >
           {set.windows.map((window, i) => (
             <WindowCard
               key={window.startMs}

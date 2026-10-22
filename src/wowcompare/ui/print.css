@@ -1,0 +1,106 @@
+/*
+ * Printing / saving the Live Compare tab as a PDF. Bootstrap's print styles already turn the dark
+ * theme into black text on white and drop backgrounds; this puts back the colours the charts
+ * need (set inline through --wc-color / --wc-fill, see charts.tsx), swaps the white-on-dark
+ * chart marks for dark-on-white ones, hides site chrome and keeps blocks from splitting.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background: #fff !important;
+  }
+
+  /* Bootstrap prints every link's URL after it; spell links make that unreadable. */
+  a[href]:after,
+  abbr[title]:after {
+    content: none !important;
+  }
+
+  /* Site chrome. */
+  nav.global,
+  footer,
+  vite-plugin-checker-error-overlay {
+    display: none !important;
+  }
+
+  /* Colours and fills set through the print-safe helpers. */
+  [style*='--wc-color'] {
+    color: var(--wc-color) !important;
+  }
+  [style*='--wc-fill'] {
+    background: var(--wc-fill) !important;
+  }
+
+  /* Chart marks drawn in translucent white for the dark theme. */
+  .wc-track {
+    fill: #eee;
+  }
+  .wc-band {
+    fill: #ccc;
+  }
+  .wc-ref,
+  .wc-ref-dot {
+    fill: #333;
+  }
+  .wc-axis {
+    stroke: #bbb;
+  }
+  .wc-track-fill {
+    background: #eee !important;
+  }
+  .wc-band-fill {
+    background: #ccc !important;
+  }
+  .wc-ref-bar {
+    background: #aaa !important;
+  }
+  .wc-ref-fill {
+    background: #333 !important;
+  }
+  .wc-reel-outside {
+    stroke: #888;
+  }
+  .wc-reel-outside-fill {
+    fill: #f0f0f0;
+  }
+  .wc-reel-average {
+    stroke: #555;
+  }
+
+  /* Reels scroll sideways on screen; on paper they wrap. */
+  .wc-reel {
+    flex-wrap: wrap !important;
+    overflow: visible !important;
+  }
+
+  /* Tables scroll sideways on screen; on paper show them whole. */
+  .panel [style*='overflow-x'] {
+    overflow: visible !important;
+  }
+
+  .panel {
+    border: none !important;
+    margin-bottom: 8mm !important;
+  }
+  .panel-heading h1 {
+    font-size: 20pt;
+  }
+  .panel-heading,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+  .wc-avoid-break,
+  li,
+  tr,
+  svg {
+    break-inside: avoid;
+  }
+}

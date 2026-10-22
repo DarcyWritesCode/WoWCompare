@@ -1,5 +1,7 @@
 import { formatNumber } from 'common/format';
-import { ReactNode } from 'react';
+import { CSSProperties, ReactNode } from 'react';
+
+import './print.css';
 
 /** Shared chart colours: the player in gold (as in the window reels), the reference in white. */
 export const CHART_COLORS = {
@@ -10,6 +12,17 @@ export const CHART_COLORS = {
   track: 'rgba(255, 255, 255, 0.06)',
   loss: '#f44336',
 };
+
+/**
+ * Inline text colour that survives printing: Bootstrap's print styles force all text black, and
+ * print.css puts back colours set through `--wc-color`.
+ */
+export const tint = (color?: string): CSSProperties =>
+  color ? ({ color, '--wc-color': color } as CSSProperties) : {};
+
+/** Inline background that survives printing, via `--wc-fill` (see `tint`). */
+export const fill = (color: string): CSSProperties =>
+  ({ background: color, '--wc-fill': color }) as CSSProperties;
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -45,9 +58,10 @@ export function CompareBar({
       aria-label={title}
     >
       {title && <title>{title}</title>}
-      <rect width={width} height={height} rx={2} fill={CHART_COLORS.track} />
+      <rect className="wc-track" width={width} height={height} rx={2} fill={CHART_COLORS.track} />
       {range && (
         <rect
+          className="wc-band"
           x={x(range[0])}
           width={Math.max(2, x(range[1]) - x(range[0]))}
           height={height}
@@ -57,6 +71,7 @@ export function CompareBar({
       {value !== null && <rect y={3} width={x(value)} height={height - 6} rx={2} fill={color} />}
       {reference != null && (
         <rect
+          className="wc-ref"
           x={x(reference) - 1}
           y={-2}
           width={2}
@@ -77,19 +92,27 @@ export function CompareLegend({
   /** Whether the bars show the top logs' range. */
   range?: boolean;
 }) {
-  const swatch = (style: React.CSSProperties) => (
+  const swatch = (style: CSSProperties, className?: string) => (
     <span
+      className={className}
       style={{ display: 'inline-block', width: 14, height: 8, marginRight: 4, ...style }}
       aria-hidden
     />
   );
   return (
     <p className="text-muted" style={{ fontSize: '0.9em' }}>
-      {swatch({ background: CHART_COLORS.you, borderRadius: 2 })}You{' '}
-      {swatch({ width: 2, height: 12, background: CHART_COLORS.reference, marginLeft: 12 })}
+      {swatch({ ...fill(CHART_COLORS.you), borderRadius: 2 })}You{' '}
+      {swatch(
+        { width: 2, height: 12, ...fill(CHART_COLORS.reference), marginLeft: 12 },
+        'wc-ref-fill',
+      )}
       {referenceLabel}
       {range && (
-        <> {swatch({ background: CHART_COLORS.band, marginLeft: 12 })}range of the top logs</>
+        <>
+          {' '}
+          {swatch({ ...fill(CHART_COLORS.band), marginLeft: 12 }, 'wc-band-fill')}range of the top
+          logs
+        </>
       )}
     </p>
   );
@@ -157,9 +180,17 @@ export function DpsStrip({
       role="img"
       aria-label={`Your ${unit} ${format(you)} among the top logs`}
     >
-      <line x1={pad} x2={width - pad} y1={axisY} y2={axisY} stroke={CHART_COLORS.band} />
+      <line
+        className="wc-axis"
+        x1={pad}
+        x2={width - pad}
+        y1={axisY}
+        y2={axisY}
+        stroke={CHART_COLORS.band}
+      />
       {others.map((v, i) => (
         <circle
+          className="wc-ref-dot"
           key={i}
           cx={x(v)}
           cy={axisY}
@@ -212,12 +243,15 @@ export function ImpactBar({
   color?: string;
 }) {
   return (
-    <div style={{ height: 6, background: CHART_COLORS.track, borderRadius: 2, marginTop: 4 }}>
+    <div
+      className="wc-track-fill"
+      style={{ height: 6, ...fill(CHART_COLORS.track), borderRadius: 2, marginTop: 4 }}
+    >
       <div
         style={{
           width: `${clamp(fraction) * 100}%`,
           height: '100%',
-          background: color,
+          ...fill(color),
           borderRadius: 2,
         }}
       />

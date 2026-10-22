@@ -4,7 +4,7 @@ import { SpellLink } from 'interface';
 import { median } from '../benchmarks/aggregate';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { EntryKind, MetricKind } from '../profile/types';
-import { CompareBar, CompareLegend } from './charts';
+import { CompareBar, CompareLegend, tint } from './charts';
 
 /** At or above this a log counts as following an expectation. */
 const FOLLOWED = 0.9;
@@ -129,7 +129,7 @@ export default function AplExpectations({
                   )}
                 </td>
                 <td>{row.top.length > 0 ? `${followed} / ${row.top.length}` : '—'}</td>
-                <td style={{ color }}>{text}</td>
+                <td style={tint(color)}>{text}</td>
               </tr>
             );
           })}

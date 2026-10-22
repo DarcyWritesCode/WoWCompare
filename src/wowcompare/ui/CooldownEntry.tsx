@@ -5,7 +5,7 @@ import { median } from '../benchmarks/aggregate';
 import { CooldownWindowSet, LogSnapshot } from '../metrics/results';
 import { classSpellMatcher } from '../simc/specs';
 import { STATUS_COLORS } from './ProfileResultsTable';
-import { CompareBar, CompareLegend } from './charts';
+import { CompareBar, CompareLegend, tint } from './charts';
 
 /** A buff is listed if it's up going into most of the player's or the top logs' windows. */
 const COMMON = 0.5;
@@ -154,12 +154,11 @@ export default function CooldownEntry({
                   <tr key={row.key}>
                     <td>{row.label}</td>
                     <td
-                      style={{
-                        color:
-                          row.mine !== null && row.top && row.mine < row.top * BEHIND
-                            ? STATUS_COLORS.warn
-                            : undefined,
-                      }}
+                      style={tint(
+                        row.mine !== null && row.top && row.mine < row.top * BEHIND
+                          ? STATUS_COLORS.warn
+                          : undefined,
+                      )}
                     >
                       {row.format(row.mine)}
                     </td>

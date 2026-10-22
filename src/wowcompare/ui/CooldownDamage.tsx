@@ -5,7 +5,7 @@ import { ReactNode } from 'react';
 import { median } from '../benchmarks/aggregate';
 import { LogSnapshot } from '../metrics/results';
 import { STATUS_COLORS } from './ProfileResultsTable';
-import { CHART_COLORS } from './charts';
+import { CHART_COLORS, fill, tint } from './charts';
 import { damageFactor, headline, hpShare, Normalization } from './normalize';
 import { BenchmarkColumn } from './useBenchmarks';
 
@@ -49,11 +49,12 @@ function DamageChart({
   const bar = (value: number | null, color: string, label: string) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: 12 }} title={label}>
       <div
+        className={color === CHART_COLORS.referenceFill ? 'wc-ref-bar' : undefined}
         style={{
           width: `${((value ?? 0) / max) * 100}%`,
           minWidth: value ? 2 : 0,
           height: 8,
-          background: color,
+          ...fill(color),
           borderRadius: 2,
         }}
       />
@@ -178,7 +179,7 @@ function StatCell({
   if (uncast) {
     return (
       <td style={{ whiteSpace: 'nowrap' }}>
-        <span style={{ color: color(stat.damagePerWindow, reference?.damagePerWindow) }}>
+        <span style={tint(color(stat.damagePerWindow, reference?.damagePerWindow))}>
           {stat.damagePerWindow ? `${format(stat.damagePerWindow)} / window` : '—'}
         </span>
       </td>
@@ -186,11 +187,11 @@ function StatCell({
   }
   return (
     <td style={{ whiteSpace: 'nowrap' }}>
-      <span style={{ color: color(stat.castsPerWindow, reference?.castsPerWindow) }}>
+      <span style={tint(color(stat.castsPerWindow, reference?.castsPerWindow))}>
         {stat.castsPerWindow === null ? '—' : stat.castsPerWindow.toFixed(1)}
       </span>
       {' × '}
-      <span style={{ color: color(stat.perCast, reference?.perCast) }}>
+      <span style={tint(color(stat.perCast, reference?.perCast))}>
         {stat.perCast === null ? '—' : format(stat.perCast)}
       </span>
     </td>
@@ -293,7 +294,7 @@ export default function CooldownDamage({
               </>
             )}
             <details>
-              <summary className="text-muted" style={{ cursor: 'pointer' }}>
+              <summary className="text-muted hidden-print" style={{ cursor: 'pointer' }}>
                 Casts and damage per cast, every benchmark
               </summary>
               <div style={{ overflowX: 'auto' }}>

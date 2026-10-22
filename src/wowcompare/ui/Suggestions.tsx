@@ -143,7 +143,7 @@ export default function Suggestions({
           </table>
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-primary hidden-print"
             onClick={trackSelected}
             disabled={selected.size === 0}
           >
@@ -194,7 +194,7 @@ export default function Suggestions({
           </tbody>
         </table>
       </div>
-      <button type="button" className="btn btn-primary" onClick={useSuggestedOrder}>
+      <button type="button" className="btn btn-primary hidden-print" onClick={useSuggestedOrder}>
         Use suggested order
       </button>
     </>

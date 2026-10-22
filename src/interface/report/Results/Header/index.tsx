@@ -188,7 +188,7 @@ export default function Header({
             <CharacterMiniBox player={player} characterProfile={characterProfile} config={config} />
             {!shouldShowDungeonPullList(fight, selectedPull) ? (
               <>
-                <TabStrip>
+                <TabStrip className="hidden-print">
                   {tabList
                     .filter((tab: InternalTab) => !tab.hidden || tab.url === selectedTab)
                     .map(({ icon: Icon, ...tab }) => (
@@ -203,6 +203,7 @@ export default function Header({
                     ))}
                 </TabStrip>
                 <TabSelect
+                  className="hidden-print"
                   onChange={(event) => navigate(makeTabUrl(event.target.value))}
                   value={activeTab}
                 >
