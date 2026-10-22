@@ -4,7 +4,7 @@ import { SpellLink } from 'interface';
 import { MetricKind } from '../profile/types';
 import { ProfileResults, ScoredMetric, Status } from '../metrics/results';
 
-const METRIC_ORDER: MetricKind[] = ['uptime', 'procUsage', 'cooldownUsage', 'windowDps'];
+export const METRIC_ORDER: MetricKind[] = ['uptime', 'procUsage', 'cooldownUsage', 'windowDps'];
 
 export const METRIC_LABELS: Record<MetricKind, string> = {
   uptime: 'Uptime',

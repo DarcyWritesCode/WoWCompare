@@ -10,6 +10,7 @@ import Report from 'parser/core/Report';
 
 import ProfileMetrics from '../metrics/ProfileMetrics';
 import { LogSnapshot } from '../metrics/results';
+import type { ParseRequest, ParseResponse } from './parseWorker';
 
 export interface LogRef {
   reportCode: string;
@@ -25,7 +26,8 @@ const cache = new Map<string, Promise<LogSnapshot | null>>();
 
 const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-async function parse(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
+/** Fetches and parses one log in the current thread. */
+export async function parseLogSnapshot(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
   const report: Report = {
     ...(await fetchFights(ref.reportCode)),
     code: ref.reportCode,
@@ -80,15 +82,82 @@ async function parse(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
   return parser.getModule(ProfileMetrics)?.snapshot() ?? null;
 }
 
+const WORKER_COUNT = 3;
+let workers: Worker[] | null | undefined;
+let nextWorker = 0;
+let nextRequestId = 0;
+interface PendingRequest {
+  config: Config;
+  ref: LogRef;
+  resolve: (snapshot: LogSnapshot | null) => void;
+  reject: (err: Error) => void;
+}
+const pending = new Map<number, PendingRequest>();
+
+/** A worker that fails to load (e.g. a module touching the DOM) disables the pool for good. */
+function abandonWorkers(err: unknown) {
+  console.warn('benchmark workers failed, parsing on the main thread', err);
+  workers?.forEach((worker) => worker.terminate());
+  workers = null;
+  const requests = [...pending.values()];
+  pending.clear();
+  requests.forEach(({ config, ref, resolve, reject }) =>
+    parseLogSnapshot(config, ref).then(resolve, reject),
+  );
+}
+
+/** Lazily starts the worker pool; null where workers aren't available (falls back to the main thread). */
+function getWorkers(): Worker[] | null {
+  if (workers === undefined) {
+    try {
+      workers = Array.from({ length: WORKER_COUNT }, () => {
+        const worker = new Worker(new URL('./parseWorker.ts', import.meta.url), {
+          type: 'module',
+        });
+        worker.onmessage = ({ data }: MessageEvent<ParseResponse>) => {
+          const request = pending.get(data.id);
+          pending.delete(data.id);
+          if ('error' in data) {
+            request?.reject(new Error(data.error));
+          } else {
+            request?.resolve(data.snapshot);
+          }
+        };
+        worker.onerror = (event) => {
+          event.preventDefault();
+          abandonWorkers(`${event.message} (${event.filename}:${event.lineno})`);
+        };
+        return worker;
+      });
+    } catch (err) {
+      abandonWorkers(err);
+    }
+  }
+  return workers ?? null;
+}
+
+function parseInWorker(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
+  const pool = getWorkers();
+  if (!pool) {
+    return parseLogSnapshot(config, ref);
+  }
+  const id = (nextRequestId += 1);
+  const worker = pool[nextWorker++ % pool.length];
+  return new Promise((resolve, reject) => {
+    pending.set(id, { config, ref, resolve, reject });
+    worker.postMessage({ id, specId: config.spec.id, ref } satisfies ParseRequest);
+  });
+}
+
 /**
- * Runs one benchmark log through the same parser and profile metrics as the analyzed log.
- * Results are cached for the session (Phase 5 moves this to a shared Supabase cache).
+ * Runs one benchmark log through the same parser and profile metrics as the analyzed log, in a
+ * Web Worker. Results are cached for the session (Phase 5 moves this to a shared Supabase cache).
  */
 export function parseBenchmarkLog(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
   const key = `${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
   let result = cache.get(key);
   if (!result) {
-    result = parse(config, ref);
+    result = parseInWorker(config, ref);
     result.catch(() => cache.delete(key));
     cache.set(key, result);
   }

@@ -47,6 +47,14 @@ const HASH_ONLY_CHUNKS = new Set(['StatTracker']);
 
 // https://vitejs.dev/config/
 export default defineConfig((env) => ({
+  // WoWCompare: benchmark parse workers. ES format for the lazy spec parsers; one chunk because
+  // rolldown mis-links the worker's shared chunks (missing exports at load).
+  // Workers don't inherit `plugins`, so the lingui macro and svg transforms are repeated here.
+  worker: {
+    format: 'es',
+    plugins: () => [lingui(), babel({ presets: [linguiTransformerBabelPreset()] }), svgr()],
+    rollupOptions: { output: { inlineDynamicImports: true } },
+  },
   build: {
     cssMinify: env.mode === 'production',
     sourcemap: env.mode === 'production',

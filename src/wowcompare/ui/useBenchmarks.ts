@@ -1,4 +1,4 @@
-import { formatDuration, formatNumber, formatPercentage } from 'common/format';
+import { formatDuration, formatNumber } from 'common/format';
 import Config from 'parser/Config';
 import { useState } from 'react';
 
@@ -8,6 +8,7 @@ import { fetchRankings, RankedParse, RankingsQuery } from '../benchmarks/ranking
 import { PlayerContext, SAME_BUILD_THRESHOLD, selectBenchmarks } from '../benchmarks/select';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
+import { describeBuild, describeComp, describeHeroTrees } from './build';
 
 /** Benchmark logs fetched and parsed at once. */
 const CONCURRENCY = 3;
@@ -24,6 +25,10 @@ export interface BenchmarkColumn {
   title: string;
   subtitle: string;
   results: ProfileResults | null;
+  /** Hero tree and talent differences (single logs) or the hero tree mix (medians). */
+  build?: string;
+  buildTooltip?: string;
+  comp?: string;
 }
 
 /** One parsed benchmark log, selectable in the window timelines. */
@@ -99,42 +104,61 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
         done += 1;
         setStatus(`Parsing benchmark logs: ${done} / ${unique.length}`);
       });
-      const resultsOf = (parses: RankedParse[]) =>
-        parses.map((p) => parsed.get(p)?.results).filter((r): r is ProfileResults => !!r);
-      const single = (parse: RankedParse | undefined) =>
-        (parse && parsed.get(parse)?.results) ?? null;
+      const snapshotsOf = (parses: RankedParse[]) =>
+        parses.map((p) => parsed.get(p)).filter((r): r is LogSnapshot => !!r);
+      const single = (
+        title: string,
+        parse: RankedParse | undefined,
+        note = '',
+      ): BenchmarkColumn => {
+        const snapshot = parse && parsed.get(parse);
+        if (!parse || !snapshot) {
+          return {
+            title,
+            subtitle: parse ? `${describeParse(parse)} · failed to load` : 'none',
+            results: null,
+          };
+        }
+        const build = describeBuild(snapshot.build, player.talents);
+        return {
+          title,
+          subtitle: describeParse(parse) + note,
+          results: snapshot.results,
+          build: build.summary,
+          buildTooltip: build.tooltip,
+          comp: describeComp(snapshot.comp),
+        };
+      };
+      const median = (title: string, parses: RankedParse[], note = ''): BenchmarkColumn => {
+        const snapshots = snapshotsOf(parses);
+        return {
+          title,
+          subtitle: `${snapshots.length} logs${note}`,
+          results: medianResults(
+            profile,
+            snapshots.map((s) => s.results),
+          ),
+          build: describeHeroTrees(snapshots),
+        };
+      };
       const closeCount = selection.top10Close.filter((c) => c.withinBounds).length;
 
       setColumns([
-        {
-          title: '#1',
-          subtitle: selection.top ? describeParse(selection.top) : 'none',
-          results: single(selection.top),
-        },
-        {
-          title: 'Top 10 median',
-          subtitle: `${resultsOf(selection.top10).length} logs`,
-          results: medianResults(profile, resultsOf(selection.top10)),
-        },
-        {
-          title: 'Same build',
-          subtitle: selection.sameBuild
-            ? `${describeParse(selection.sameBuild.parse)} · ${formatPercentage(selection.sameBuild.similarity, 0)}% talents match${selection.sameBuild.similarity < SAME_BUILD_THRESHOLD ? ' (closest)' : ''}`
-            : 'none',
-          results: single(selection.sameBuild?.parse),
-        },
-        {
-          title: 'Best close',
-          subtitle: selection.bestClose
-            ? `${describeParse(selection.bestClose.parse)}${selection.bestClose.withinBounds ? '' : ' (nearest, outside bounds)'}`
-            : 'none',
-          results: single(selection.bestClose?.parse),
-        },
-        {
-          title: 'Top 10 close median',
-          subtitle: `${resultsOf(closeParses).length} logs, ${closeCount} within bounds`,
-          results: medianResults(profile, resultsOf(closeParses)),
-        },
+        single('#1', selection.top),
+        median('Top 10 median', selection.top10),
+        single(
+          'Same build',
+          selection.sameBuild?.parse,
+          selection.sameBuild && selection.sameBuild.similarity < SAME_BUILD_THRESHOLD
+            ? ' (closest build)'
+            : '',
+        ),
+        single(
+          'Best close',
+          selection.bestClose?.parse,
+          selection.bestClose?.withinBounds ? '' : ' (nearest, outside bounds)',
+        ),
+        median('Top 10 close median', closeParses, `, ${closeCount} within bounds`),
       ]);
 
       // Individual logs for the window timelines, the single-parse benchmarks first.

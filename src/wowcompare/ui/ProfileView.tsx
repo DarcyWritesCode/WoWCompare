@@ -23,7 +23,7 @@ export default function ProfileView({
         <>
           <h2>Benchmarks</h2>
           {columns ? (
-            <BenchmarkTable playerResults={snapshot.results} benchmarks={columns} />
+            <BenchmarkTable player={snapshot} benchmarks={columns} />
           ) : (
             <button type="button" className="btn btn-primary" onClick={load} disabled={!!status}>
               Load benchmarks

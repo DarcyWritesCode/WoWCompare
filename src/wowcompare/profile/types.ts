@@ -58,6 +58,12 @@ export interface CastRule {
   thresholds?: Thresholds;
 }
 
+/** A hero talent tree, recognised by its keystone talent's entry id. */
+export interface HeroTree {
+  name: string;
+  keystoneEntryId: number;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -67,4 +73,5 @@ export interface Profile {
   version: number;
   entries: ProfileEntry[];
   rules: CastRule[];
+  heroTrees?: HeroTree[];
 }

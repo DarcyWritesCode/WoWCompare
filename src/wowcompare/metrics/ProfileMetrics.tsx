@@ -65,7 +65,7 @@ class ProfileMetrics extends Analyzer {
         ilvl: Math.round(this.selectedCombatant.ilvl ?? 0),
         durationMs: fight.end_time - fight.start_time,
         raidSize: fight.size ?? 20,
-        talents: this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`),
+        talents: this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`).sort(),
       },
     };
   }
@@ -78,8 +78,16 @@ class ProfileMetrics extends Analyzer {
     }
     const damage = this.damageTimeline.damage.reduce((sum, d) => sum + d.amount, 0);
     const durationMs = this.owner.fight.end_time - this.owner.fight.start_time;
+    const talents = this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`).sort();
+    const heroTree = this.profile?.heroTrees?.find((tree) =>
+      talents.some((t) => t.startsWith(`${tree.keystoneEntryId}:`)),
+    )?.name;
+    const comp = { tank: 0, healer: 0, dps: 0 };
+    this.owner.playerDetails.forEach((player) => (comp[player.role] += 1));
     return {
       results,
+      build: { talents, heroTree },
+      comp,
       windows: this.cooldownMetrics.active ? this.cooldownMetrics.windowTimelines() : [],
       fightDps: durationMs > 0 ? (damage / durationMs) * 1000 : 0,
     };

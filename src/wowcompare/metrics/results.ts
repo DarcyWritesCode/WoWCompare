@@ -131,9 +131,24 @@ export interface CooldownWindowSet {
   windows: CooldownWindow[];
 }
 
+/** The talents behind a log, for showing how a benchmark's build differs. */
+export interface BuildInfo {
+  /** `talentEntryId:rank`, sorted; same format as ranked parses. */
+  talents: string[];
+  heroTree?: string;
+}
+
+export interface RaidComp {
+  tank: number;
+  healer: number;
+  dps: number;
+}
+
 /** Everything a parsed log contributes to the comparison. */
 export interface LogSnapshot {
   results: ProfileResults;
+  build: BuildInfo;
+  comp: RaidComp;
   windows: CooldownWindowSet[];
   fightDps: number;
 }

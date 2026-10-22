@@ -1,22 +1,36 @@
 import { SpellLink } from 'interface';
 
-import { ProfileResults, ScoredMetric, ScoredRule } from '../metrics/results';
+import { LogSnapshot, ScoredMetric, ScoredRule } from '../metrics/results';
 import { MetricKind } from '../profile/types';
-import { formatValue, METRIC_LABELS, STATUS_COLORS } from './ProfileResultsTable';
+import { formatValue, METRIC_LABELS, METRIC_ORDER, STATUS_COLORS } from './ProfileResultsTable';
+import { describeComp } from './build';
 import { BenchmarkColumn } from './useBenchmarks';
 
 /** The player's results beside the five benchmark columns, one row per entry metric and rule. */
 export default function BenchmarkTable({
-  playerResults,
+  player,
   benchmarks,
 }: {
-  playerResults: ProfileResults;
+  player: LogSnapshot;
   benchmarks: BenchmarkColumn[];
 }) {
+  const playerResults = player.results;
   const columns: BenchmarkColumn[] = [
-    { title: 'You', subtitle: 'this log', results: playerResults },
+    {
+      title: 'You',
+      subtitle: 'this log',
+      results: playerResults,
+      build: player.build.heroTree,
+      comp: describeComp(player.comp),
+    },
     ...benchmarks,
   ];
+
+  // Union across columns: an entry the player hasn't talented has no metrics of its own.
+  const kindsFor = (entryIndex: number) =>
+    METRIC_ORDER.filter((kind) =>
+      columns.some((column) => column.results?.entries[entryIndex]?.metrics[kind]),
+    );
 
   const metricCell = (column: BenchmarkColumn, entryIndex: number, kind: MetricKind) => {
     const entry = column.results?.entries[entryIndex];
@@ -38,43 +52,60 @@ export default function BenchmarkTable({
   };
 
   return (
-    <table className="table table-condensed">
-      <thead>
-        <tr>
-          <th>Rank</th>
-          <th>Buff / cooldown</th>
-          <th>Metric</th>
-          {columns.map((column) => (
-            <th key={column.title} title={column.subtitle}>
-              {column.title}
-              <div className="text-muted" style={{ fontWeight: 'normal', fontSize: '0.8em' }}>
-                {column.subtitle}
-              </div>
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {playerResults.entries.flatMap((entry, entryIndex) =>
-          (Object.keys(entry.metrics) as MetricKind[]).map((kind) => (
-            <tr key={`${entry.kind}-${entry.spellId}-${kind}`}>
-              <td>{entry.rank}</td>
-              <td>
-                <SpellLink spell={entry.spellId}>{entry.label}</SpellLink>
-              </td>
-              <td>{METRIC_LABELS[kind]}</td>
-              {columns.map((column) => metricCell(column, entryIndex, kind))}
-            </tr>
-          )),
-        )}
-        {playerResults.rules.map((rule, ruleIndex) => (
-          <tr key={rule.ruleId}>
-            <td>{rule.rule.rank}</td>
-            <td colSpan={2}>{rule.rule.description}</td>
-            {columns.map((column) => ruleCell(column, ruleIndex))}
+    <div style={{ overflowX: 'auto' }}>
+      <table className="table table-condensed">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Buff / cooldown</th>
+            <th>Metric</th>
+            {columns.map((column) => (
+              <th key={column.title} title={column.subtitle}>
+                {column.title}
+                <div className="text-muted" style={{ fontWeight: 'normal', fontSize: '0.8em' }}>
+                  {column.subtitle}
+                  {column.build && (
+                    <div
+                      title={column.buildTooltip || undefined}
+                      style={
+                        column.buildTooltip ? { textDecoration: 'underline dotted' } : undefined
+                      }
+                    >
+                      {column.build}
+                    </div>
+                  )}
+                  {column.comp && <div>{column.comp}</div>}
+                </div>
+              </th>
+            ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {playerResults.entries.flatMap((entry, entryIndex) =>
+            kindsFor(entryIndex).map((kind) => (
+              <tr
+                key={`${entry.kind}-${entry.spellId}-${kind}`}
+                style={{ opacity: entry.applicable ? 1 : 0.4 }}
+              >
+                <td>{entry.rank}</td>
+                <td>
+                  <SpellLink spell={entry.spellId}>{entry.label}</SpellLink>
+                  {!entry.applicable && ' (not talented)'}
+                </td>
+                <td>{METRIC_LABELS[kind]}</td>
+                {columns.map((column) => metricCell(column, entryIndex, kind))}
+              </tr>
+            )),
+          )}
+          {playerResults.rules.map((rule, ruleIndex) => (
+            <tr key={rule.ruleId}>
+              <td>{rule.rule.rank}</td>
+              <td colSpan={2}>{rule.rule.description}</td>
+              {columns.map((column) => ruleCell(column, ruleIndex))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
