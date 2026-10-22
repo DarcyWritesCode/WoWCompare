@@ -6,21 +6,21 @@ import { ProfileResults, ScoredMetric, Status } from '../metrics/results';
 
 const METRIC_ORDER: MetricKind[] = ['uptime', 'procUsage', 'cooldownUsage', 'windowDps'];
 
-const METRIC_LABELS: Record<MetricKind, string> = {
+export const METRIC_LABELS: Record<MetricKind, string> = {
   uptime: 'Uptime',
   procUsage: 'Proc usage',
   cooldownUsage: 'Cooldown usage',
   windowDps: 'DPS in window',
 };
 
-const STATUS_COLORS: Record<Status, string> = {
+export const STATUS_COLORS: Record<Status, string> = {
   pass: '#4caf50',
   warn: '#ff9800',
   fail: '#f44336',
   unknown: 'inherit',
 };
 
-function formatValue(kind: MetricKind | 'rule', value: number | null) {
+export function formatValue(kind: MetricKind | 'rule', value: number | null) {
   if (value === null) {
     return '—';
   }

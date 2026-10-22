@@ -15,7 +15,7 @@ interface EventRange {
   end_time: number;
 }
 
-async function* fetchPlayerEvents(
+export async function* fetchPlayerEvents(
   report: Report,
   fight: WCLFight,
   player: Pick<PlayerInfo, 'id'>,

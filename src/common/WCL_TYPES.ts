@@ -35,7 +35,7 @@ export type WCLRanking = {
   hardModeLevel: number;
   name: string;
   report: WCLRankingReport;
-  server: WCLRankingServer;
+  server?: WCLRankingServer;
   size: number;
   spec: string;
   startTime: number;

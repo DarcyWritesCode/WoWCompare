@@ -3,6 +3,7 @@ import Analyzer, { Options } from 'parser/core/Analyzer';
 
 import { getProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
+import BenchmarkComparison from '../ui/BenchmarkComparison';
 import ProfileResultsTable from '../ui/ProfileResultsTable';
 import BuffMetrics from './BuffMetrics';
 import ConditionRules from './ConditionRules';
@@ -44,6 +45,31 @@ class ProfileMetrics extends Analyzer {
     return scoreProfile(this.profile, entryMetrics, ruleResults);
   }
 
+  /** Inputs for the benchmark comparison; undefined outside boss fights. */
+  private get benchmarkProps() {
+    const { fight, config } = this.owner;
+    if (!this.profile || !fight.boss || fight.difficulty === undefined) {
+      return undefined;
+    }
+    return {
+      config,
+      profile: this.profile,
+      query: {
+        encounterId: fight.boss,
+        difficulty: fight.difficulty,
+        className: config.spec.wclClassName,
+        specName: config.spec.wclSpecName,
+        metric: 'dps' as const,
+      },
+      player: {
+        ilvl: Math.round(this.selectedCombatant.ilvl ?? 0),
+        durationMs: fight.end_time - fight.start_time,
+        raidSize: fight.size ?? 20,
+        talents: this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`),
+      },
+    };
+  }
+
   tab() {
     const results = this.results();
     if (!results || !this.profile) {
@@ -57,6 +83,12 @@ class ProfileMetrics extends Analyzer {
           title={`${this.profile!.name} (v${this.profile!.version}, patch ${this.profile!.patch})`}
         >
           <ProfileResultsTable results={results} />
+          {this.benchmarkProps && (
+            <>
+              <h2>Benchmarks</h2>
+              <BenchmarkComparison {...this.benchmarkProps} playerResults={results} />
+            </>
+          )}
         </Panel>
       ),
     };
