@@ -64,21 +64,24 @@ export default function ProfileResultsTable({ results }: { results: ProfileResul
           </tr>
         </thead>
         <tbody>
-          {results.entries.map((entry) => (
-            <tr
-              key={`${entry.kind}-${entry.spellId}`}
-              style={{ opacity: entry.applicable ? 1 : 0.4 }}
-            >
-              <td>{entry.rank}</td>
-              <td>
-                <SpellLink spell={entry.spellId}>{entry.label}</SpellLink>
-                {!entry.applicable && ' (not talented)'}
-              </td>
-              {usedMetrics.map((kind) => (
-                <MetricCell key={kind} kind={kind} metric={entry.metrics[kind]} />
-              ))}
-            </tr>
-          ))}
+          {[...results.entries]
+            // Untalented entries last; sort is stable, so rank order holds within each group.
+            .sort((a, b) => Number(b.applicable) - Number(a.applicable))
+            .map((entry) => (
+              <tr
+                key={`${entry.kind}-${entry.spellId}`}
+                style={{ opacity: entry.applicable ? 1 : 0.4 }}
+              >
+                <td>{entry.rank}</td>
+                <td>
+                  <SpellLink spell={entry.spellId}>{entry.label}</SpellLink>
+                  {!entry.applicable && ' (not talented)'}
+                </td>
+                {usedMetrics.map((kind) => (
+                  <MetricCell key={kind} kind={kind} metric={entry.metrics[kind]} />
+                ))}
+              </tr>
+            ))}
         </tbody>
       </table>
 

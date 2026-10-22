@@ -10,6 +10,8 @@ import Report from 'parser/core/Report';
 
 import ProfileMetrics from '../metrics/ProfileMetrics';
 import { LogSnapshot } from '../metrics/results';
+import { setProfile } from '../profile/registry';
+import { Profile } from '../profile/types';
 import type { ParseRequest, ParseResponse } from './parseWorker';
 
 export interface LogRef {
@@ -88,6 +90,7 @@ let nextWorker = 0;
 let nextRequestId = 0;
 interface PendingRequest {
   config: Config;
+  profile: Profile;
   ref: LogRef;
   resolve: (snapshot: LogSnapshot | null) => void;
   reject: (err: Error) => void;
@@ -101,8 +104,8 @@ function abandonWorkers(err: unknown) {
   workers = null;
   const requests = [...pending.values()];
   pending.clear();
-  requests.forEach(({ config, ref, resolve, reject }) =>
-    parseLogSnapshot(config, ref).then(resolve, reject),
+  requests.forEach(({ config, profile, ref, resolve, reject }) =>
+    parseOnMainThread(config, profile, ref).then(resolve, reject),
   );
 }
 
@@ -136,28 +139,37 @@ function getWorkers(): Worker[] | null {
   return workers ?? null;
 }
 
-function parseInWorker(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
+function parseOnMainThread(config: Config, profile: Profile, ref: LogRef) {
+  setProfile(config.spec.id, profile);
+  return parseLogSnapshot(config, ref);
+}
+
+function parseInWorker(config: Config, profile: Profile, ref: LogRef): Promise<LogSnapshot | null> {
   const pool = getWorkers();
   if (!pool) {
-    return parseLogSnapshot(config, ref);
+    return parseOnMainThread(config, profile, ref);
   }
   const id = (nextRequestId += 1);
   const worker = pool[nextWorker++ % pool.length];
   return new Promise((resolve, reject) => {
-    pending.set(id, { config, ref, resolve, reject });
-    worker.postMessage({ id, specId: config.spec.id, ref } satisfies ParseRequest);
+    pending.set(id, { config, profile, ref, resolve, reject });
+    worker.postMessage({ id, specId: config.spec.id, profile, ref } satisfies ParseRequest);
   });
 }
 
 /**
- * Runs one benchmark log through the same parser and profile metrics as the analyzed log, in a
+ * Runs one benchmark log through the same parser and profile as the analyzed log, in a
  * Web Worker. Results are cached for the session (Phase 5 moves this to a shared Supabase cache).
  */
-export function parseBenchmarkLog(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
-  const key = `${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
+export function parseBenchmarkLog(
+  config: Config,
+  profile: Profile,
+  ref: LogRef,
+): Promise<LogSnapshot | null> {
+  const key = `${profile.id}@${profile.version}:${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
   let result = cache.get(key);
   if (!result) {
-    result = parseInWorker(config, ref);
+    result = parseInWorker(config, profile, ref);
     result.catch(() => cache.delete(key));
     cache.set(key, result);
   }

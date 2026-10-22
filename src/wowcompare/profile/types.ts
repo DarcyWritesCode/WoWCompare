@@ -37,10 +37,16 @@ export interface ProfileEntry {
   windowMs?: number;
   /** Optional display name; the UI otherwise uses the spell's name. */
   label?: string;
+  /**
+   * The entry applies only if the player has one of these abilities (talent check), e.g. the
+   * cast behind a debuff. Without it, buffs apply when seen in the log.
+   */
+  requiresSpellIds?: number[];
 }
 
 export interface AuraCondition {
-  auraId: number;
+  /** Any one of these auras satisfies the condition (e.g. Berserk or Incarnation). */
+  auraIds: number[];
   /** `player`: a buff on the player from any source. `target`: the player's debuff on the cast target. */
   on: 'player' | 'target';
   present: boolean;
@@ -64,12 +70,23 @@ export interface HeroTree {
   keystoneEntryId: number;
 }
 
+/** Where a profile came from, shown with the results. */
+export interface ProfileSource {
+  kind: 'simc';
+  /** SimC APL file, e.g. `druid_feral`. */
+  file: string;
+  url: string;
+  /** False when the live APL couldn't be fetched and the bundled snapshot was used. */
+  live: boolean;
+  retrievedAt?: number;
+}
+
 export interface Profile {
   id: string;
   name: string;
   specId: number;
-  /** Game patch the profile was written for, e.g. "12.0.5". */
-  patch: string;
+  source?: ProfileSource;
+  /** Changes whenever the profile's content does (for SimC profiles, a hash of the APL). */
   version: number;
   entries: ProfileEntry[];
   rules: CastRule[];

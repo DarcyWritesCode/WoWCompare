@@ -62,3 +62,39 @@ export function medianResults(profile: Profile, results: ProfileResults[]): Prof
 
   return { profileId: profile.id, profileVersion: profile.version, entries, rules };
 }
+
+/** Benchmark-derived thresholds: pass at 97% of the reference value, warn at 90%. */
+export const PASS_FRACTION = 0.97;
+export const WARN_FRACTION = 0.9;
+
+const thresholdsFrom = (reference: number | null | undefined) =>
+  typeof reference === 'number'
+    ? { pass: reference * PASS_FRACTION, warn: reference * WARN_FRACTION }
+    : undefined;
+
+/**
+ * Re-scores results against a reference (the top-10 median) instead of profile thresholds,
+ * which SimC APLs don't provide. Entries and rules line up by index: both come from one profile.
+ */
+export function rescoreAgainst(results: ProfileResults, reference: ProfileResults): ProfileResults {
+  return {
+    ...results,
+    entries: results.entries.map((entry, i) => {
+      const metrics: ScoredEntry['metrics'] = {};
+      for (const [kind, metric] of Object.entries(entry.metrics) as [
+        MetricKind,
+        ScoredEntry['metrics'][MetricKind],
+      ][]) {
+        if (metric) {
+          const thresholds = thresholdsFrom(reference.entries[i]?.metrics[kind]?.value);
+          metrics[kind] = { ...metric, status: statusFor(metric.value, thresholds) };
+        }
+      }
+      return { ...entry, metrics };
+    }),
+    rules: results.rules.map((rule, i) => ({
+      ...rule,
+      status: statusFor(rule.value, thresholdsFrom(reference.rules[i]?.value)),
+    })),
+  };
+}

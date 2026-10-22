@@ -7,6 +7,7 @@ import Events, {
   RemoveBuffEvent,
   RemoveBuffStackEvent,
 } from 'parser/core/Events';
+import Abilities from 'parser/core/modules/Abilities';
 import Enemies from 'parser/shared/modules/Enemies';
 
 import { getProfile } from '../profile/registry';
@@ -42,9 +43,11 @@ export interface ProcCounts {
 /** Uptime, proc usage and in-window throughput for the profile's buff and debuff entries. */
 class BuffMetrics extends Analyzer {
   static dependencies = {
+    abilities: Abilities,
     enemies: Enemies,
     damageTimeline: DamageTimeline,
   };
+  protected abilities!: Abilities;
   protected enemies!: Enemies;
   protected damageTimeline!: DamageTimeline;
 
@@ -221,8 +224,22 @@ class BuffMetrics extends Analyzer {
         );
         metrics.windowDps = { value: throughput.ratio, detail: { ...throughput } };
       }
-      return { spellId: entry.spellId, kind: entry.kind, applicable: true, metrics };
+      return { spellId: entry.spellId, kind: entry.kind, applicable: this.applies(entry), metrics };
     });
+  }
+
+  /**
+   * Entries tied to an ability apply when the player has it (talent check). Procs otherwise
+   * apply when they happened at all: a proc that never appears is most likely not talented.
+   */
+  private applies(entry: ProfileEntry): boolean {
+    if (entry.requiresSpellIds?.length) {
+      return entry.requiresSpellIds.some((id) => this.abilities.getAbility(id) !== undefined);
+    }
+    if (entry.metrics.includes('procUsage')) {
+      return (this.procs.get(entry.spellId)?.gained ?? 0) > 0;
+    }
+    return true;
   }
 }
 

@@ -34,7 +34,9 @@ class ConditionRules extends Analyzer {
     const entity =
       condition.on === 'player' ? this.selectedCombatant : this.enemies.getEntity(event);
     const sourceID = condition.on === 'player' ? null : this.owner.playerId;
-    const up = entity?.hasBuff(condition.auraId, event.timestamp, BUFFER_MS, 0, sourceID) ?? false;
+    const up = condition.auraIds.some(
+      (auraId) => entity?.hasBuff(auraId, event.timestamp, BUFFER_MS, 0, sourceID) ?? false,
+    );
     return up === condition.present;
   }
 

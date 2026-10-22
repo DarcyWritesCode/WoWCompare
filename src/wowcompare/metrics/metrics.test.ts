@@ -62,7 +62,6 @@ describe('scoreProfile', () => {
     id: 'p',
     name: 'p',
     specId: 1,
-    patch: '1',
     version: 2,
     entries: [
       {

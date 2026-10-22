@@ -1,4 +1,6 @@
+import { PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { LogSnapshot } from '../metrics/results';
+import { Profile } from '../profile/types';
 import BenchmarkTable from './BenchmarkTable';
 import ProfileResultsTable from './ProfileResultsTable';
 import useBenchmarks, { BenchmarkInputs } from './useBenchmarks';
@@ -6,24 +8,46 @@ import WindowReels from './WindowReels';
 
 /** The Profile tab: this log's results, the benchmark comparison and the cooldown window reels. */
 export default function ProfileView({
+  profile,
+  unresolved,
   snapshot,
   benchmarkInputs,
 }: {
+  profile: Profile;
+  /** SimC tokens the profile builder couldn't map to spells. */
+  unresolved: string[];
   snapshot: LogSnapshot;
   /** Undefined outside boss fights, where there are no rankings to compare against. */
-  benchmarkInputs: BenchmarkInputs | undefined;
+  benchmarkInputs: Omit<BenchmarkInputs, 'playerResults'> | undefined;
 }) {
-  const { status, columns, logs, load } = useBenchmarks(benchmarkInputs);
+  const { status, columns, logs, playerResults, load } = useBenchmarks(
+    benchmarkInputs && { ...benchmarkInputs, playerResults: snapshot.results },
+  );
+  const results = playerResults ?? snapshot.results;
+  const source = profile.source;
 
   return (
     <>
-      <ProfileResultsTable results={snapshot.results} />
+      {source && (
+        <p className="text-muted">
+          Built from SimC's <a href={source.url}>{source.file}</a> APL (
+          {source.live
+            ? `fetched ${new Date(source.retrievedAt ?? Date.now()).toLocaleString()}`
+            : 'bundled snapshot; the live APL could not be fetched'}
+          ). Rank follows APL priority order.{' '}
+          {playerResults
+            ? `Colours compare against the top-10 median: pass at ${PASS_FRACTION * 100}%, warn at ${WARN_FRACTION * 100}%.`
+            : 'Load benchmarks to colour results against the top-10 median.'}
+          {unresolved.length > 0 && ` Not mapped to spells yet: ${unresolved.join(', ')}.`}
+        </p>
+      )}
+      <ProfileResultsTable results={results} />
 
       {benchmarkInputs && (
         <>
           <h2>Benchmarks</h2>
           {columns ? (
-            <BenchmarkTable player={snapshot} benchmarks={columns} />
+            <BenchmarkTable player={{ ...snapshot, results }} benchmarks={columns} />
           ) : (
             <button type="button" className="btn btn-primary" onClick={load} disabled={!!status}>
               Load benchmarks

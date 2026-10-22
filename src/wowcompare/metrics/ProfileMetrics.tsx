@@ -1,7 +1,7 @@
 import { Panel } from 'interface';
 import Analyzer, { Options } from 'parser/core/Analyzer';
 
-import { getProfile } from '../profile/registry';
+import { getBuiltProfile, getProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
 import ProfileView from '../ui/ProfileView';
 import BuffMetrics from './BuffMetrics';
@@ -102,10 +102,13 @@ class ProfileMetrics extends Analyzer {
       title: 'Profile',
       url: 'profile',
       render: () => (
-        <Panel
-          title={`${this.profile!.name} (v${this.profile!.version}, patch ${this.profile!.patch})`}
-        >
-          <ProfileView snapshot={snapshot} benchmarkInputs={this.benchmarkProps} />
+        <Panel title={this.profile!.name}>
+          <ProfileView
+            profile={this.profile!}
+            unresolved={getBuiltProfile(this.profile!.specId)?.unresolved ?? []}
+            snapshot={snapshot}
+            benchmarkInputs={this.benchmarkProps}
+          />
         </Panel>
       ),
     };

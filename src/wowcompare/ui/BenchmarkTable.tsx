@@ -26,10 +26,13 @@ export default function BenchmarkTable({
     ...benchmarks,
   ];
 
-  // Union across columns: an entry the player hasn't talented has no metrics of its own.
+  // Rows with no value in any column (e.g. a talent nobody took) are left out.
   const kindsFor = (entryIndex: number) =>
     METRIC_ORDER.filter((kind) =>
-      columns.some((column) => column.results?.entries[entryIndex]?.metrics[kind]),
+      columns.some((column) => {
+        const entry = column.results?.entries[entryIndex];
+        return entry?.applicable && typeof entry.metrics[kind]?.value === 'number';
+      }),
     );
 
   const metricCell = (column: BenchmarkColumn, entryIndex: number, kind: MetricKind) => {

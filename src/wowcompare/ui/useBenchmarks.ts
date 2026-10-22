@@ -2,7 +2,7 @@ import { formatDuration, formatNumber } from 'common/format';
 import Config from 'parser/Config';
 import { useState } from 'react';
 
-import { medianResults } from '../benchmarks/aggregate';
+import { medianResults, rescoreAgainst } from '../benchmarks/aggregate';
 import { parseBenchmarkLog } from '../benchmarks/parseLog';
 import { fetchRankings, RankedParse, RankingsQuery } from '../benchmarks/rankings';
 import { PlayerContext, SAME_BUILD_THRESHOLD, selectBenchmarks } from '../benchmarks/select';
@@ -18,6 +18,7 @@ export interface BenchmarkInputs {
   profile: Profile;
   player: PlayerContext;
   query: RankingsQuery;
+  playerResults: ProfileResults;
 }
 
 /** A column of the comparison table: one parse, or a median over several. */
@@ -46,6 +47,7 @@ export function describeParse(parse: RankedParse) {
 
 async function parseAll(
   config: Config,
+  profile: Profile,
   parses: RankedParse[],
   onDone: () => void,
 ): Promise<Map<RankedParse, LogSnapshot | null>> {
@@ -56,7 +58,7 @@ async function parseAll(
       try {
         snapshots.set(
           parse,
-          await parseBenchmarkLog(config, {
+          await parseBenchmarkLog(config, profile, {
             reportCode: parse.reportCode,
             fightId: parse.fightId,
             playerName: parse.name,
@@ -79,6 +81,8 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
   const [status, setStatus] = useState<string | null>(null);
   const [columns, setColumns] = useState<BenchmarkColumn[] | null>(null);
   const [logs, setLogs] = useState<BenchmarkLog[]>([]);
+  /** The player's results scored against the top-10 median, once benchmarks are in. */
+  const [playerResults, setPlayerResults] = useState<ProfileResults | null>(null);
 
   const load = async () => {
     if (!inputs) {
@@ -100,7 +104,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
 
       let done = 0;
       setStatus(`Parsing benchmark logs: 0 / ${unique.length}`);
-      const parsed = await parseAll(config, unique, () => {
+      const parsed = await parseAll(config, profile, unique, () => {
         done += 1;
         setStatus(`Parsing benchmark logs: ${done} / ${unique.length}`);
       });
@@ -143,23 +147,34 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
       };
       const closeCount = selection.top10Close.filter((c) => c.withinBounds).length;
 
-      setColumns([
-        single('#1', selection.top),
-        median('Top 10 median', selection.top10),
-        single(
-          'Same build',
-          selection.sameBuild?.parse,
-          selection.sameBuild && selection.sameBuild.similarity < SAME_BUILD_THRESHOLD
-            ? ' (closest build)'
-            : '',
-        ),
-        single(
-          'Best close',
-          selection.bestClose?.parse,
-          selection.bestClose?.withinBounds ? '' : ' (nearest, outside bounds)',
-        ),
-        median('Top 10 close median', closeParses, `, ${closeCount} within bounds`),
-      ]);
+      const reference = medianResults(
+        profile,
+        snapshotsOf(selection.top10).map((s) => s.results),
+      );
+      const rescore = (column: BenchmarkColumn): BenchmarkColumn => ({
+        ...column,
+        results: column.results && rescoreAgainst(column.results, reference),
+      });
+      setPlayerResults(rescoreAgainst(inputs.playerResults, reference));
+      setColumns(
+        [
+          single('#1', selection.top),
+          median('Top 10 median', selection.top10),
+          single(
+            'Same build',
+            selection.sameBuild?.parse,
+            selection.sameBuild && selection.sameBuild.similarity < SAME_BUILD_THRESHOLD
+              ? ' (closest build)'
+              : '',
+          ),
+          single(
+            'Best close',
+            selection.bestClose?.parse,
+            selection.bestClose?.withinBounds ? '' : ' (nearest, outside bounds)',
+          ),
+          median('Top 10 close median', closeParses, `, ${closeCount} within bounds`),
+        ].map(rescore),
+      );
 
       // Individual logs for the window timelines, the single-parse benchmarks first.
       const rolesOf = (parse: RankedParse) =>
@@ -198,5 +213,5 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
     }
   };
 
-  return { status, columns, logs, load };
+  return { status, columns, logs, playerResults, load };
 }

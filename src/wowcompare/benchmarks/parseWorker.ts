@@ -2,11 +2,15 @@
 import './workerShim';
 import configs from 'parser';
 
+import { Profile } from '../profile/types';
+import { setProfile } from '../profile/registry';
 import { LogRef, parseLogSnapshot } from './parseLog';
 
 export interface ParseRequest {
   id: number;
   specId: number;
+  /** The analyzed log's profile, so benchmarks are scored the same way. */
+  profile: Profile;
   ref: LogRef;
 }
 
@@ -21,6 +25,7 @@ self.onmessage = async ({ data }: MessageEvent<ParseRequest>) => {
     if (!config) {
       throw new Error(`No parser registered for spec ${data.specId}`);
     }
+    setProfile(data.specId, data.profile);
     const snapshot = await parseLogSnapshot(config, data.ref);
     self.postMessage({ id: data.id, snapshot } satisfies ParseResponse);
   } catch (err) {
