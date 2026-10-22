@@ -94,6 +94,9 @@ export const BENCHMARK_KINDS: BenchmarkKind[] = [
   'top10Close',
 ];
 
+/** Loaded with the tab; the rest are offered as buttons. */
+const AUTO_LOADED: BenchmarkKind[] = ['top', 'top10'];
+
 export const BENCHMARK_LABELS: Record<BenchmarkKind, string> = {
   top: '#1',
   top10: 'Top 10 median',
@@ -125,8 +128,8 @@ function parsesFor(selection: BenchmarkSelection, kind: BenchmarkKind): RankedPa
 }
 
 /**
- * Fetches rankings and the #1 parse straight away; the other benchmarks load on request, since
- * each costs one or more full log parses.
+ * Fetches rankings, the #1 parse and the top 10 straight away; the other benchmarks load on
+ * request, since each can cost full log parses.
  */
 export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
   const [status, setStatus] = useState<string | null>(null);
@@ -160,7 +163,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
     }
   };
 
-  // Rankings and the #1 parse load as soon as the tab opens.
+  // Rankings, the #1 parse and the top 10 load as soon as the tab opens.
   useEffect(() => {
     if (!inputs || started.current) {
       return;
@@ -173,7 +176,9 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
         const next = selectBenchmarks(rankings, inputs.player);
         setRankingCount(rankings.length);
         setSelection(next);
+        // #1 first so something shows quickly, then the top 10 (usually cached server-side).
         await load('top', next);
+        await load('top10', next);
       } catch (err) {
         setStatus(`Failed to fetch rankings: ${(err as Error).message}`);
       }
@@ -307,7 +312,10 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
     /** Benchmarks that can still be loaded. */
     available: selection
       ? BENCHMARK_KINDS.filter(
-          (kind) => !loaded.includes(kind) && parsesFor(selection, kind).length > 0,
+          (kind) =>
+            !AUTO_LOADED.includes(kind) &&
+            !loaded.includes(kind) &&
+            parsesFor(selection, kind).length > 0,
         )
       : [],
     rankingCount,

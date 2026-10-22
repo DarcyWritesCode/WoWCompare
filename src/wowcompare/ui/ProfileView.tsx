@@ -9,20 +9,19 @@ import BiggestMistakes from './BiggestMistakes';
 import CooldownDamage from './CooldownDamage';
 import ProfileResultsTable from './ProfileResultsTable';
 import Suggestions from './Suggestions';
-import useBenchmarks, { BENCHMARK_LABELS, BenchmarkInputs } from './useBenchmarks';
+import useBenchmarks, { BenchmarkInputs, BenchmarkKind } from './useBenchmarks';
 import WindowReels from './WindowReels';
 
 /** Extra benchmarks, as offered on their buttons. */
-const LOAD_HINTS = {
-  top10: 'Top 10 median (10 logs, also sets the reference)',
+const LOAD_HINTS: Partial<Record<BenchmarkKind, string>> = {
   sameBuild: 'Same build (1 log)',
   bestClose: 'Best close parse (1 log)',
   top10Close: 'Top 10 close median (up to 10 logs)',
-} as const;
+};
 
 /**
- * The Live Compare tab: this log against the #1 parse (loaded straight away), with the other
- * benchmarks one click each, plus the cooldown window reels.
+ * The Live Compare tab: this log against the #1 parse and the top 10 (loaded straight away), with
+ * the other benchmarks one click each, plus the cooldown window reels.
  */
 export default function ProfileView({
   profile,
@@ -84,10 +83,10 @@ export default function ProfileView({
                   type="button"
                   className="btn btn-default"
                   style={{ marginRight: 8, marginBottom: 4 }}
-                  disabled={busy || kind === 'top'}
+                  disabled={busy}
                   onClick={() => load(kind)}
                 >
-                  {kind === 'top' ? BENCHMARK_LABELS.top : LOAD_HINTS[kind]}
+                  {LOAD_HINTS[kind]}
                 </button>
               ))}
             </p>
