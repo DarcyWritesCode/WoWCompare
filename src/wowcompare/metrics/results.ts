@@ -128,12 +128,25 @@ export interface CooldownWindow {
   casts: WindowCast[];
 }
 
+/** One ability's damage inside a cooldown's windows, summed over all of them. */
+export interface WindowAbility {
+  /** Name token, to match the same ability across logs whose spell IDs differ. */
+  token: string;
+  name: string;
+  /** The ID that did the most damage under this name (for icons/links). */
+  spellId: number;
+  casts: number;
+  damage: number;
+}
+
 export interface CooldownWindowSet {
   token: string;
   spellId: number;
   rank: number;
   label?: string;
   windows: CooldownWindow[];
+  /** The biggest damage abilities inside the windows. */
+  abilities: WindowAbility[];
 }
 
 /** The talents behind a log, for showing how a benchmark's build differs. */

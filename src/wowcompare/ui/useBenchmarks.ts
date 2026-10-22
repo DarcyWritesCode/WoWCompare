@@ -30,6 +30,8 @@ export interface BenchmarkColumn {
   build?: string;
   buildTooltip?: string;
   comp?: string;
+  /** The parsed log(s) behind the column: one for a single parse, several for a median. */
+  snapshots: LogSnapshot[];
 }
 
 /** One parsed benchmark log, selectable in the window timelines. */
@@ -121,6 +123,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
             title,
             subtitle: parse ? `${describeParse(parse)} · failed to load` : 'none',
             results: null,
+            snapshots: [],
           };
         }
         const build = describeBuild(snapshot.build, player.talents);
@@ -131,6 +134,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
           build: build.summary,
           buildTooltip: build.tooltip,
           comp: describeComp(snapshot.comp),
+          snapshots: [snapshot],
         };
       };
       const median = (title: string, parses: RankedParse[], note = ''): BenchmarkColumn => {
@@ -143,6 +147,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
             snapshots.map((s) => s.results),
           ),
           build: describeHeroTrees(snapshots),
+          snapshots,
         };
       };
       const closeCount = selection.top10Close.filter((c) => c.withinBounds).length;

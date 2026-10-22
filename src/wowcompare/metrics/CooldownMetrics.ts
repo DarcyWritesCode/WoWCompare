@@ -7,14 +7,18 @@ import { getProfile } from '../profile/registry';
 import { Profile, ProfileEntry } from '../profile/types';
 import DamageTimeline from './DamageTimeline';
 import SpellCatalog from './SpellCatalog';
-import { Interval, mergeIntervals, windowThroughput } from './intervals';
-import { CooldownWindow, CooldownWindowSet, RawEntryMetrics } from './results';
+import { contains, Interval, mergeIntervals, windowThroughput } from './intervals';
+import { CooldownWindow, CooldownWindowSet, RawEntryMetrics, WindowAbility } from './results';
+import { simcToken } from '../simc/resolve';
 
 /** Context shown around each window in the timelines. */
 const WINDOW_PADDING_MS = 3_000;
 const BUCKET_MS = 1_000;
 /** Shorter cooldowns are rotational (e.g. a 6s builder), not something to grade as a cooldown. */
 const MIN_COOLDOWN_SECONDS = 20;
+/** Abilities below this share of a cooldown's window damage aren't listed. */
+const MIN_ABILITY_SHARE = 0.03;
+const MAX_ABILITIES = 8;
 
 export interface CooldownUsage {
   casts: number;
@@ -141,18 +145,61 @@ class CooldownMetrics extends Analyzer {
       if (!resolved || !this.isCooldown(resolved.spellId)) {
         return [];
       }
+      const windows = this.windows(entry, resolved.spellId, resolved.casts);
       return [
         {
           token: entry.token,
           spellId: resolved.spellId,
           rank: entry.rank,
           label: entry.label,
-          windows: this.windows(entry, resolved.spellId, resolved.casts).map((window) =>
-            this.timeline(window),
-          ),
+          windows: windows.map((window) => this.timeline(window)),
+          abilities: this.abilityBreakdown(windows),
         },
       ];
     });
+  }
+
+  /** The biggest damage abilities inside the windows, grouped by name across spell IDs. */
+  private abilityBreakdown(windows: Interval[]): WindowAbility[] {
+    const byName = new Map<string, WindowAbility & { damageById: Map<number, number> }>();
+    const get = (spellId: number) => {
+      const name = this.damageTimeline.names.get(spellId) ?? `Spell ${spellId}`;
+      const token = simcToken(name);
+      let ability = byName.get(token);
+      if (!ability) {
+        ability = { token, name, spellId, casts: 0, damage: 0, damageById: new Map() };
+        byName.set(token, ability);
+      }
+      return ability;
+    };
+    let total = 0;
+    for (const hit of this.damageTimeline.damage) {
+      if (contains(windows, hit.timestamp)) {
+        const ability = get(hit.spellId);
+        ability.damage += hit.amount;
+        ability.damageById.set(
+          hit.spellId,
+          (ability.damageById.get(hit.spellId) ?? 0) + hit.amount,
+        );
+        total += hit.amount;
+      }
+    }
+    for (const cast of this.damageTimeline.casts) {
+      if (contains(windows, cast.timestamp)) {
+        const ability = byName.get(simcToken(this.damageTimeline.names.get(cast.spellId) ?? ''));
+        if (ability) {
+          ability.casts += 1;
+        }
+      }
+    }
+    return [...byName.values()]
+      .filter((ability) => total > 0 && ability.damage / total >= MIN_ABILITY_SHARE)
+      .sort((a, b) => b.damage - a.damage)
+      .slice(0, MAX_ABILITIES)
+      .map(({ damageById, ...ability }) => ({
+        ...ability,
+        spellId: [...damageById.entries()].sort((a, b) => b[1] - a[1])[0][0],
+      }));
   }
 
   private timeline(window: Interval): CooldownWindow {

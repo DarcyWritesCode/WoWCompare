@@ -3,6 +3,7 @@ import { LogSnapshot } from '../metrics/results';
 import { Profile } from '../profile/types';
 import AplExpectations from './AplExpectations';
 import BenchmarkTable from './BenchmarkTable';
+import CooldownDamage from './CooldownDamage';
 import ProfileResultsTable from './ProfileResultsTable';
 import useBenchmarks, { BenchmarkInputs } from './useBenchmarks';
 import WindowReels from './WindowReels';
@@ -55,6 +56,13 @@ export default function ProfileView({
             </button>
           )}{' '}
           {status && <p className="text-muted">{status}</p>}
+        </>
+      )}
+
+      {columns && (
+        <>
+          <h2>Damage inside cooldowns</h2>
+          <CooldownDamage player={snapshot} columns={columns} />
         </>
       )}
 

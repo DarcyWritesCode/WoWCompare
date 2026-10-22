@@ -6,13 +6,15 @@ import Events, { CastEvent, DamageEvent } from 'parser/core/Events';
  * and the window timelines can slice them later.
  */
 class DamageTimeline extends Analyzer {
-  readonly damage: { timestamp: number; amount: number }[] = [];
+  readonly damage: { timestamp: number; amount: number; spellId: number }[] = [];
   readonly casts: {
     timestamp: number;
     spellId: number;
     targetID?: number;
     targetInstance?: number;
   }[] = [];
+  /** In-game names of every spell seen in `damage` and `casts`. */
+  readonly names = new Map<number, string>();
 
   constructor(options: Options) {
     super(options);
@@ -21,6 +23,7 @@ class DamageTimeline extends Analyzer {
   }
 
   private onCast(event: CastEvent) {
+    this.names.set(event.ability.guid, event.ability.name);
     this.casts.push({
       timestamp: event.timestamp,
       spellId: event.ability.guid,
@@ -33,7 +36,12 @@ class DamageTimeline extends Analyzer {
     if (event.targetIsFriendly) {
       return;
     }
-    this.damage.push({ timestamp: event.timestamp, amount: event.amount + (event.absorbed ?? 0) });
+    this.names.set(event.ability.guid, event.ability.name);
+    this.damage.push({
+      timestamp: event.timestamp,
+      amount: event.amount + (event.absorbed ?? 0),
+      spellId: event.ability.guid,
+    });
   }
 }
 

@@ -22,6 +22,7 @@ export default function BenchmarkTable({
       results: playerResults,
       build: player.build.heroTree,
       comp: describeComp(player.comp),
+      snapshots: [player],
     },
     ...benchmarks,
   ];
