@@ -113,6 +113,11 @@ import EmpowerNormalizer from 'parser/shared/normalizers/EmpowerNormalizer';
 import VolatileVoidSuffuser from 'parser/retail/modules/items/midnight/trinkets/VolatileVoidSuffuser';
 import LightOfTheCosmicCrescendo from 'parser/retail/modules/items/midnight/trinkets/LightOfTheCosmicCrescendo';
 import FrenziedFocus from 'parser/retail/modules/items/midnight/enchants/FrenziedFocus';
+import BuffMetrics from 'wowcompare/metrics/BuffMetrics';
+import ConditionRules from 'wowcompare/metrics/ConditionRules';
+import CooldownMetrics from 'wowcompare/metrics/CooldownMetrics';
+import DamageTimeline from 'wowcompare/metrics/DamageTimeline';
+import ProfileMetrics from 'wowcompare/metrics/ProfileMetrics';
 // This prints to console anything that the DI has to do
 const debugDependencyInjection = false;
 const MAX_DI_ITERATIONS = 100;
@@ -239,6 +244,13 @@ class CombatLogParser {
     // Dungeons
 
     // Raids
+
+    // WoWCompare: profile-driven metrics (inactive for specs without a profile)
+    damageTimeline: DamageTimeline,
+    buffMetrics: BuffMetrics,
+    cooldownMetrics: CooldownMetrics,
+    conditionRules: ConditionRules,
+    profileMetrics: ProfileMetrics,
   };
   // Override this with spec specific modules when extending
   static specModules: DependenciesDefinition = {};

@@ -29,6 +29,7 @@
       "localization": ["./src/localization"],
       "parser/*": ["./src/parser/*"],
       "parser": ["./src/parser"],
+      "wowcompare/*": ["./src/wowcompare/*"],
       "CHANGELOG": ["./src/CHANGELOG"],
       "CONTRIBUTORS": ["./src/CONTRIBUTORS"],
       "mergeAllChangelogs": ["./src/mergeAllChangelogs"],
