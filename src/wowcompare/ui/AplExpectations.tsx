@@ -2,7 +2,7 @@ import { formatPercentage } from 'common/format';
 import { SpellLink } from 'interface';
 
 import { median } from '../benchmarks/aggregate';
-import { LogSnapshot, ProfileResults } from '../metrics/results';
+import { entryResult, LogSnapshot, ProfileResults, ruleResult } from '../metrics/results';
 import { EntryKind, MetricKind } from '../profile/types';
 import { CompareBar, CompareLegend, tint } from './charts';
 
@@ -54,24 +54,23 @@ export default function AplExpectations({
   topLogs: LogSnapshot[];
 }) {
   const rows: Row[] = [
-    ...player.rules.map((rule, i) => ({
+    ...player.rules.map((rule) => ({
       key: rule.ruleId,
       label: rule.rule.description,
       says: rule.rule.strict === false ? 'Favoured' : 'Always',
       soft: rule.rule.strict === false,
       you: rule.value,
       top: topLogs
-        .map((log) => log.results.rules[i])
-        .filter((r) => r && r.casts > 0)
-        .map((r) => r.value!),
+        .map((log) => ruleResult(log.results, rule.ruleId))
+        .filter((r) => r !== undefined && r.casts > 0)
+        .map((r) => r!.value!),
     })),
-    ...player.entries.map((entry, i) => {
+    ...player.entries.map((entry) => {
+      const topEntries = topLogs.map((log) => entryResult(log.results, entry));
       // Buffs that turned out to be states (e.g. Eclipse) are measured by uptime, not proc usage.
       const isState =
         entry.kind === 'buff' &&
-        [entry, ...topLogs.map((log) => log.results.entries[i])].every(
-          (e) => e?.metrics.procUsage === undefined,
-        );
+        [entry, ...topEntries].every((e) => e?.metrics.procUsage === undefined);
       const { metric, says } = isState
         ? { metric: 'uptime' as const, says: 'Keep up' }
         : ENTRY_EXPECTATIONS[entry.kind];
@@ -82,10 +81,9 @@ export default function AplExpectations({
         // A state has no "right" uptime; it's context, not pass/fail.
         soft: isState,
         you: entry.applicable ? (entry.metrics[metric]?.value ?? null) : null,
-        top: topLogs
-          .map((log) => log.results.entries[i])
+        top: topEntries
           .filter((e) => e?.applicable)
-          .map((e) => e.metrics[metric]?.value)
+          .map((e) => e!.metrics[metric]?.value)
           .filter((v): v is number => typeof v === 'number'),
       };
     }),

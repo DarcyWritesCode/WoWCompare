@@ -1,4 +1,4 @@
-import { LogSnapshot, AuraUsage } from '../metrics/results';
+import { AuraUsage, entryResult, LogSnapshot } from '../metrics/results';
 import { MetricKind, Profile, ProfileEntry } from '../profile/types';
 import { median } from './aggregate';
 
@@ -98,8 +98,6 @@ export function correlation(pairs: [number, number][]): number | null {
 }
 
 export interface RankSuggestion {
-  /** Index into the profile's entries. */
-  index: number;
   entry: ProfileEntry;
   metric: MetricKind | null;
   /** Correlation of the metric with fight DPS across the logs; null without enough data. */
@@ -113,21 +111,22 @@ export interface RankSuggestion {
  * player plus benchmarks). Entries without enough data keep their APL order, after the rest.
  */
 export function suggestRanks(profile: Profile, logs: LogSnapshot[]): RankSuggestion[] {
-  const scored = profile.entries.map((entry, index) => {
+  const scored = profile.entries.map((entry) => {
     const metric =
       entry.metrics.find((kind) =>
-        logs.some((log) => typeof log.results.entries[index]?.metrics[kind]?.value === 'number'),
+        logs.some(
+          (log) => typeof entryResult(log.results, entry)?.metrics[kind]?.value === 'number',
+        ),
       ) ?? null;
     const pairs: [number, number][] = metric
       ? logs.flatMap((log): [number, number][] => {
-          const value = log.results.entries[index]?.metrics[metric]?.value;
-          return log.results.entries[index]?.applicable && typeof value === 'number'
-            ? [[value, log.fightDps]]
-            : [];
+          const result = entryResult(log.results, entry);
+          const value = result?.metrics[metric]?.value;
+          return result?.applicable && typeof value === 'number' ? [[value, log.fightDps]] : [];
         })
       : [];
     const r = pairs.length >= MIN_LOGS_FOR_RANK ? correlation(pairs) : null;
-    return { index, entry, metric, r, logs: pairs.length };
+    return { entry, metric, r, logs: pairs.length };
   });
 
   const ordered = [

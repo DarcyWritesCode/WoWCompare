@@ -1,4 +1,4 @@
-import { CooldownWindowSet, LogSnapshot, WindowEntryState } from '../metrics/results';
+import { CooldownWindowSet, entryResult, LogSnapshot, WindowEntryState } from '../metrics/results';
 import { Profile, ProfileEntry, SpellRef } from '../profile/types';
 import { median } from './aggregate';
 
@@ -46,7 +46,7 @@ const LONGER_BY = 1.1;
  * casts they fit in per second of window, valued at their own damage per cast. Rates per second
  * keep a short window from counting twice (once as "ends early", again as "fewer casts").
  */
-function windowMistakes(profile: Profile, player: LogSnapshot, topLogs: LogSnapshot[]): Mistake[] {
+function windowMistakes(player: LogSnapshot, topLogs: LogSnapshot[]): Mistake[] {
   const seconds = player.durationMs / 1000;
   return player.windows.flatMap((set) => {
     const topSets = topLogs
@@ -74,8 +74,8 @@ function windowMistakes(profile: Profile, player: LogSnapshot, topLogs: LogSnaps
     );
     const myDamage = windowDamage(set);
     // The extra seconds would have earned normal damage anyway; only the window's lift counts.
-    const index = profile.entries.findIndex((e) => e.kind === 'cooldown' && e.token === set.token);
-    const outside = player.results.entries[index]?.metrics.windowDps?.detail;
+    const outside = entryResult(player.results, { kind: 'cooldown', token: set.token })?.metrics
+      .windowDps?.detail;
     const outsideDps =
       outside?.timeOut && outside.damageOut != null
         ? outside.damageOut / (outside.timeOut / 1000)
@@ -145,17 +145,17 @@ function entryName(player: LogSnapshot, entry: ProfileEntry, spellId: number) {
 /** Uptime, proc and cooldown-usage gaps, valued with the player's own damage. */
 function entryMistakes(profile: Profile, player: LogSnapshot, topLogs: LogSnapshot[]): Mistake[] {
   const seconds = player.durationMs / 1000;
-  return profile.entries.flatMap((entry, i): Mistake[] => {
-    const mine = player.results.entries[i];
+  return profile.entries.flatMap((entry): Mistake[] => {
+    const mine = entryResult(player.results, entry);
     if (!mine?.applicable) {
       return [];
     }
     const top = (kind: 'uptime' | 'procUsage' | 'cooldownUsage') =>
       median(
         topLogs
-          .map((log) => log.results.entries[i])
+          .map((log) => entryResult(log.results, entry))
           .filter((e) => e?.applicable)
-          .map((e) => e.metrics[kind]?.value)
+          .map((e) => e!.metrics[kind]?.value)
           .filter((v): v is number => typeof v === 'number'),
       );
     const name = entryName(player, entry, mine.spellId);
@@ -266,7 +266,6 @@ function samples(log: LogSnapshot, token: string): WindowSample[] {
  * player's and the top logs' windows together).
  */
 function entryStateMistakes(
-  profile: Profile,
   player: LogSnapshot,
   topLogs: LogSnapshot[],
   isClassSpell: (spellId: number, token: string) => boolean,
@@ -284,8 +283,9 @@ function entryStateMistakes(
 
     // Resources: each point pooled is spent inside the window instead of outside it, so it
     // gains the window's extra damage on top of what the spender does anyway.
-    const index = profile.entries.findIndex((e) => e.kind === 'cooldown' && e.token === set.token);
-    const ratio = player.results.entries[index]?.metrics.windowDps?.value ?? null;
+    const ratio =
+      entryResult(player.results, { kind: 'cooldown', token: set.token })?.metrics.windowDps
+        ?.value ?? null;
     for (const resource of Object.keys(mine[0].state.resources)) {
       const at = (list: WindowSample[]) =>
         median(
@@ -387,9 +387,9 @@ export function biggestMistakes(
     return [];
   }
   return [
-    ...windowMistakes(profile, player, topLogs),
+    ...windowMistakes(player, topLogs),
     ...entryMistakes(profile, player, topLogs),
-    ...entryStateMistakes(profile, player, topLogs, isClassSpell),
+    ...entryStateMistakes(player, topLogs, isClassSpell),
   ]
     .filter((m) => Number.isFinite(m.dps) && m.dps >= player.fightDps * MIN_SHARE)
     .sort((a, b) => b.dps - a.dps)

@@ -1,5 +1,13 @@
 import { MetricKind, Profile } from '../profile/types';
-import { ProfileResults, ScoredEntry, ScoredRule, statusFor, tokenLabel } from '../metrics/results';
+import {
+  entryResult,
+  ProfileResults,
+  ruleResult,
+  ScoredEntry,
+  ScoredRule,
+  statusFor,
+  tokenLabel,
+} from '../metrics/results';
 
 export function median(values: number[]): number | null {
   if (values.length === 0) {
@@ -18,7 +26,7 @@ export function medianResults(profile: Profile, results: ProfileResults[]): Prof
   const entries = profile.entries
     .map((entry): ScoredEntry => {
       const matching = results
-        .map((r) => r.entries.find((e) => e.token === entry.token && e.kind === entry.kind))
+        .map((r) => entryResult(r, entry))
         .filter((e): e is ScoredEntry => e !== undefined && e.applicable);
       const metrics: ScoredEntry['metrics'] = {};
       for (const kind of entry.metrics as MetricKind[]) {
@@ -50,7 +58,7 @@ export function medianResults(profile: Profile, results: ProfileResults[]): Prof
   const rules = profile.rules
     .map((rule): ScoredRule => {
       const matching = results
-        .map((r) => r.rules.find((x) => x.ruleId === rule.id))
+        .map((r) => ruleResult(r, rule.id))
         .filter((r): r is ScoredRule => r !== undefined && r.casts > 0);
       const value = median(matching.map((r) => r.value!));
       return {
@@ -78,27 +86,28 @@ const thresholdsFrom = (reference: number | null | undefined) =>
 
 /**
  * Re-scores results against a reference (the top-10 median) instead of profile thresholds,
- * which SimC APLs don't provide. Entries and rules line up by index: both come from one profile.
+ * which SimC APLs don't provide.
  */
 export function rescoreAgainst(results: ProfileResults, reference: ProfileResults): ProfileResults {
   return {
     ...results,
-    entries: results.entries.map((entry, i) => {
+    entries: results.entries.map((entry) => {
+      const referenceEntry = entryResult(reference, entry);
       const metrics: ScoredEntry['metrics'] = {};
       for (const [kind, metric] of Object.entries(entry.metrics) as [
         MetricKind,
         ScoredEntry['metrics'][MetricKind],
       ][]) {
         if (metric) {
-          const thresholds = thresholdsFrom(reference.entries[i]?.metrics[kind]?.value);
+          const thresholds = thresholdsFrom(referenceEntry?.metrics[kind]?.value);
           metrics[kind] = { ...metric, status: statusFor(metric.value, thresholds) };
         }
       }
       return { ...entry, metrics };
     }),
-    rules: results.rules.map((rule, i) => ({
+    rules: results.rules.map((rule) => ({
       ...rule,
-      status: statusFor(rule.value, thresholdsFrom(reference.rules[i]?.value)),
+      status: statusFor(rule.value, thresholdsFrom(ruleResult(reference, rule.ruleId)?.value)),
     })),
   };
 }

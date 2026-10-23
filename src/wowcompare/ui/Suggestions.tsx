@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 import { missingAuras, suggestRanks } from '../benchmarks/suggest';
 import { classSpellMatcher } from '../simc/specs';
-import { LogSnapshot } from '../metrics/results';
+import { entryResult, LogSnapshot } from '../metrics/results';
 import { Customization, readCustomization, writeCustomization } from '../profile/customizations';
 import { entryKey, Profile } from '../profile/types';
 import { METRIC_LABELS } from './ProfileResultsTable';
@@ -176,12 +176,12 @@ export default function Suggestions({
                 <td>{rank.suggestedRank}</td>
                 <td>{rank.entry.rank}</td>
                 <td>
-                  {player.results.entries[rank.index]?.spellId ? (
-                    <SpellLink spell={player.results.entries[rank.index].spellId}>
+                  {entryResult(player.results, rank.entry)?.spellId ? (
+                    <SpellLink spell={entryResult(player.results, rank.entry)!.spellId}>
                       {rank.entry.label}
                     </SpellLink>
                   ) : (
-                    (player.results.entries[rank.index]?.label ?? rank.entry.token)
+                    (entryResult(player.results, rank.entry)?.label ?? rank.entry.token)
                   )}
                 </td>
                 <td>{rank.metric ? METRIC_LABELS[rank.metric] : '—'}</td>

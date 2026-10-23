@@ -1,4 +1,4 @@
-import { CastRule, EntryKind, MetricKind, Profile, Thresholds } from '../profile/types';
+import { CastRule, EntryKind, entryKey, MetricKind, Profile, Thresholds } from '../profile/types';
 
 export type Status = 'pass' | 'warn' | 'fail' | 'unknown';
 
@@ -54,6 +54,26 @@ export interface ProfileResults {
   rules: ScoredRule[];
 }
 
+/**
+ * A log's result for a profile entry. Look results up by key, never by position: a log's entries
+ * are ordered by rank, which needn't match another profile's or log's order.
+ */
+export function entryResult(
+  results: ProfileResults | null | undefined,
+  entry: { kind: EntryKind; token: string },
+): ScoredEntry | undefined {
+  const key = entryKey(entry);
+  return results?.entries.find((e) => entryKey(e) === key);
+}
+
+/** A log's result for a cast rule, by rule ID. */
+export function ruleResult(
+  results: ProfileResults | null | undefined,
+  ruleId: string,
+): ScoredRule | undefined {
+  return results?.rules.find((r) => r.ruleId === ruleId);
+}
+
 export function statusFor(value: number | null, thresholds: Thresholds | undefined): Status {
   if (value === null || !thresholds) {
     return 'unknown';
@@ -71,7 +91,7 @@ export function scoreProfile(
 ): ProfileResults {
   const entries = profile.entries
     .map((entry): ScoredEntry => {
-      const raw = entryMetrics.find((m) => m.token === entry.token && m.kind === entry.kind);
+      const raw = entryMetrics.find((m) => entryKey(m) === entryKey(entry));
       const metrics: ScoredEntry['metrics'] = {};
       for (const kind of entry.metrics) {
         const metric = raw?.metrics[kind];

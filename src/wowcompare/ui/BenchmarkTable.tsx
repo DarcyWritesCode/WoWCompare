@@ -1,6 +1,13 @@
 import { SpellLink } from 'interface';
 
-import { LogSnapshot, ScoredMetric, ScoredRule } from '../metrics/results';
+import {
+  entryResult,
+  LogSnapshot,
+  ruleResult,
+  ScoredEntry,
+  ScoredMetric,
+  ScoredRule,
+} from '../metrics/results';
 import { MetricKind } from '../profile/types';
 import { formatValue, METRIC_LABELS, METRIC_ORDER, STATUS_COLORS } from './ProfileResultsTable';
 import { describeComp } from './build';
@@ -29,16 +36,16 @@ export default function BenchmarkTable({
   ];
 
   // Rows with no value in any column (e.g. a talent nobody took) are left out.
-  const kindsFor = (entryIndex: number) =>
+  const kindsFor = (row: ScoredEntry) =>
     METRIC_ORDER.filter((kind) =>
       columns.some((column) => {
-        const entry = column.results?.entries[entryIndex];
+        const entry = entryResult(column.results, row);
         return entry?.applicable && typeof entry.metrics[kind]?.value === 'number';
       }),
     );
 
-  const metricCell = (column: BenchmarkColumn, entryIndex: number, kind: MetricKind) => {
-    const entry = column.results?.entries[entryIndex];
+  const metricCell = (column: BenchmarkColumn, row: ScoredEntry, kind: MetricKind) => {
+    const entry = entryResult(column.results, row);
     const metric: ScoredMetric | undefined = entry?.applicable ? entry.metrics[kind] : undefined;
     return (
       <td key={column.title} style={tint(metric ? STATUS_COLORS[metric.status] : undefined)}>
@@ -47,8 +54,8 @@ export default function BenchmarkTable({
     );
   };
 
-  const ruleCell = (column: BenchmarkColumn, ruleIndex: number) => {
-    const rule: ScoredRule | undefined = column.results?.rules[ruleIndex];
+  const ruleCell = (column: BenchmarkColumn, ruleId: string) => {
+    const rule: ScoredRule | undefined = ruleResult(column.results, ruleId);
     return (
       <td key={column.title} style={tint(rule ? STATUS_COLORS[rule.status] : undefined)}>
         {rule ? formatValue('rule', rule.value) : '—'}
@@ -86,8 +93,8 @@ export default function BenchmarkTable({
           </tr>
         </thead>
         <tbody>
-          {playerResults.entries.flatMap((entry, entryIndex) =>
-            kindsFor(entryIndex).map((kind) => (
+          {playerResults.entries.flatMap((entry) =>
+            kindsFor(entry).map((kind) => (
               <tr
                 key={`${entry.kind}-${entry.token}-${kind}`}
                 style={{ opacity: entry.applicable ? 1 : 0.4 }}
@@ -98,15 +105,15 @@ export default function BenchmarkTable({
                   {!entry.applicable && ' (not talented)'}
                 </td>
                 <td>{METRIC_LABELS[kind]}</td>
-                {columns.map((column) => metricCell(column, entryIndex, kind))}
+                {columns.map((column) => metricCell(column, entry, kind))}
               </tr>
             )),
           )}
-          {playerResults.rules.map((rule, ruleIndex) => (
+          {playerResults.rules.map((rule) => (
             <tr key={rule.ruleId}>
               <td>{rule.rule.rank}</td>
               <td colSpan={2}>{rule.rule.description}</td>
-              {columns.map((column) => ruleCell(column, ruleIndex))}
+              {columns.map((column) => ruleCell(column, rule.ruleId))}
             </tr>
           ))}
         </tbody>
