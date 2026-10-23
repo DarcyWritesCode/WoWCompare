@@ -2,7 +2,7 @@ import fetchWcl, { USE_WCL_V2 } from 'common/fetchWclApi';
 import { WCLRanking, WCLRankingsResponse } from 'common/WCL_TYPES';
 import { wclQuery } from 'common/wclV2/graphql';
 
-import { rankAtPercentile } from './reference';
+import { targetRanks } from './reference';
 
 /** One ranked parse, flattened to what benchmark selection needs. */
 export interface RankedParse {
@@ -30,8 +30,6 @@ export interface RankingsQuery {
 /** WCL serves rankings 100 per page, and no further than page 20. */
 const PAGE_SIZE = 100;
 const MAX_PAGE = 20;
-/** Ranks fetched either side of the target, for the reference band and "close" selection. */
-const POOL_RADIUS = 50;
 
 const RANKINGS_QUERY = `
   query Rankings($encounterId: Int!, $className: String!, $specName: String!, $difficulty: Int!,
@@ -123,21 +121,18 @@ async function fetchTotalParses(query: RankingsQuery, parse: RankedParse): Promi
 export interface RankingsPool {
   /** The #1 parse. */
   top: RankedParse | undefined;
-  /** Parses around the reference target rank, best first. */
+  /** Parses on the rankings pages covering the reference band, best first. */
   pool: RankedParse[];
   /** Ranked parses for the spec, boss and difficulty; null when unknown (v1 mode). */
   totalParses: number | null;
 }
 
 /**
- * The #1 parse plus the ranks around `percentile`. v2 mode looks up the total number of parses
- * and fetches the pages around the target rank (two or three queries). Through the upstream
- * proxy (v1 mode) only the top 100 are available, so the pool is those.
+ * The #1 parse plus the parses spread over `REFERENCE_BAND`. v2 mode looks up the total number of
+ * parses and fetches the pages holding the band's target ranks (usually two to six queries).
+ * Through the upstream proxy (v1 mode) only the top 100 are available, so the pool is those.
  */
-export async function fetchRankingsPool(
-  query: RankingsQuery,
-  percentile: number,
-): Promise<RankingsPool> {
+export async function fetchRankingsPool(query: RankingsQuery): Promise<RankingsPool> {
   if (!USE_WCL_V2) {
     const response = await fetchWcl<WCLRankingsResponse>(
       `rankings/encounter/${query.encounterId}`,
@@ -159,19 +154,17 @@ export async function fetchRankingsPool(
     return { top, pool: [], totalParses: null };
   }
   const totalParses = await fetchTotalParses(query, top);
-  const target = totalParses === null ? 1 : rankAtPercentile(totalParses, percentile);
-  const pageOf = (rank: number) => Math.min(MAX_PAGE, Math.max(1, Math.ceil(rank / PAGE_SIZE)));
-  let pool = pageOf(target - POOL_RADIUS) === 1 ? first.parses : [];
-  for (
-    let page = Math.max(2, pageOf(target - POOL_RADIUS));
-    page <= pageOf(target + POOL_RADIUS);
-    page += 1
-  ) {
-    const next = await fetchRankingsPage(query, page);
-    pool = pool.concat(next.parses);
-    if (!next.hasMorePages) {
-      break;
-    }
+  if (totalParses === null) {
+    return { top, pool: first.parses, totalParses };
+  }
+  const pages = [
+    ...new Set(
+      targetRanks(totalParses, MAX_PAGE * PAGE_SIZE).map((rank) => Math.ceil(rank / PAGE_SIZE)),
+    ),
+  ];
+  let pool: RankedParse[] = [];
+  for (const page of pages) {
+    pool = pool.concat(page === 1 ? first.parses : (await fetchRankingsPage(query, page)).parses);
   }
   return { top, pool, totalParses };
 }

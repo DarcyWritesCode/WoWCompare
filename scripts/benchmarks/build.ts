@@ -18,7 +18,7 @@ import { parseArgs } from 'node:util';
 
 import { USE_WCL_V2 } from 'common/fetchWclApi';
 import { setAccessToken } from 'common/wclV2/auth';
-import { wclQuery } from 'common/wclV2/graphql';
+import { wclQuery, WclV2RateLimitError } from 'common/wclV2/graphql';
 import ROLES from 'game/ROLES';
 import configs from 'parser';
 import Config from 'parser/Config';
@@ -29,6 +29,7 @@ import {
   BenchmarkStatus,
   BundleStatus,
   bundleKey,
+  isCurrentStatus,
   logKey,
   profileFingerprint,
   profileKey,
@@ -36,13 +37,10 @@ import {
   SNAPSHOT_VERSION,
   SpecStatus,
   STATUS_KEY,
+  STATUS_VERSION,
 } from 'wowcompare/benchmarks/published';
 import { fetchRankingsPool, RankedParse } from 'wowcompare/benchmarks/rankings';
-import {
-  isExternallyBuffed,
-  REFERENCE_PERCENTILE,
-  selectReference,
-} from 'wowcompare/benchmarks/reference';
+import { isExternallyBuffed, selectReference } from 'wowcompare/benchmarks/reference';
 import { STALE_AFTER_MS, updateDay, WEEKDAY_NAMES } from 'wowcompare/benchmarks/schedule';
 import { LogSnapshot } from 'wowcompare/metrics/results';
 import { aplUrl, hasSimcApl, setProfile } from 'wowcompare/profile/registry';
@@ -60,9 +58,14 @@ const LOG_TIMEOUT_MS = 120_000;
 const KV_TTL_SECONDS = 21 * 24 * 60 * 60;
 /** Parsed logs not reused for this long are dropped from the job's own cache (a week + slack). */
 const CACHE_PRUNE_AFTER_MS = 9 * 24 * 60 * 60 * 1000;
-/** Pause before spending the last 5% of the hourly WCL budget. */
-const RATE_LIMIT_HEADROOM = 0.05;
-const RATE_LIMIT_CHECK_MS = 30_000;
+/**
+ * Pause before spending the last 10% of the hourly WCL budget. Four logs in flight spend ~100
+ * points between checks, well inside the headroom.
+ */
+const RATE_LIMIT_HEADROOM = 0.1;
+const RATE_LIMIT_CHECK_MS = 15_000;
+/** How long to wait after a 429 when WCL won't even say when the budget resets. */
+const RATE_LIMITED_WAIT_MS = 5 * 60_000;
 /**
  * Cloudflare resources the job sets up itself with the deploy token (KV and Pages edit): the KV
  * namespace, and its binding on the Pages project that functions/wc-api/ reads.
@@ -82,6 +85,11 @@ const { values: args } = parseArgs({
      * (`Feral`) or both (`Druid:Feral`).
      */
     spec: { type: 'string', multiple: true, default: [] },
+    /**
+     * With the schedule: these classes or specs go first, in this order, if they're due (scheduled
+     * today or stale), e.g. to choose the order of a first release.
+     */
+    first: { type: 'string', multiple: true, default: [] },
     /** Every spec, whatever the schedule says (after any `--spec` ones). */
     all: { type: 'boolean', default: false },
     /** These encounter IDs instead of the current raid (required in v1 mode). */
@@ -157,29 +165,71 @@ async function wclClientToken(): Promise<string> {
 /** Keeps the job under the WCL hourly point budget, waiting for the reset when it runs low. */
 class RateBudget {
   private checkedAt = 0;
+  /** Set while waiting for the reset; every caller waits on it, not just the one that found it. */
+  private pause: Promise<void> | null = null;
 
   async ensure() {
     if (Date.now() > deadline) {
       throw new OutOfTime();
     }
+    if (this.pause) {
+      return this.pause;
+    }
     if (!USE_WCL_V2 || Date.now() - this.checkedAt < RATE_LIMIT_CHECK_MS) {
       return;
     }
     this.checkedAt = Date.now();
-    const { rateLimitData: limit } = await wclQuery<{
-      rateLimitData: { limitPerHour: number; pointsSpentThisHour: number; pointsResetIn: number };
-    }>('query { rateLimitData { limitPerHour pointsSpentThisHour pointsResetIn } }', {});
-    if (limit.pointsSpentThisHour < limit.limitPerHour * (1 - RATE_LIMIT_HEADROOM)) {
+    const limit = await this.limits();
+    if (limit && limit.pointsSpentThisHour < limit.limitPerHour * (1 - RATE_LIMIT_HEADROOM)) {
       return;
     }
-    const waitMs = (limit.pointsResetIn + 5) * 1000;
-    if (Date.now() + waitMs > deadline) {
-      throw new OutOfTime();
+    return this.waitForReset(limit);
+  }
+
+  /** Runs `fn`, waiting out the reset and trying again whenever WCL answers 429. */
+  async retry<T>(fn: () => Promise<T>): Promise<T> {
+    for (;;) {
+      await this.ensure();
+      try {
+        return await fn();
+      } catch (err) {
+        if (!(err instanceof WclV2RateLimitError)) {
+          throw err;
+        }
+        say('WCL rate limited (429)');
+        await this.waitForReset(await this.limits());
+      }
     }
-    say(
-      `WCL budget at ${limit.pointsSpentThisHour}/${limit.limitPerHour} points; waiting ${Math.ceil(waitMs / 60_000)} min for the reset`,
-    );
-    await sleep(waitMs);
+  }
+
+  private async limits() {
+    try {
+      const data = await wclQuery<{
+        rateLimitData: { limitPerHour: number; pointsSpentThisHour: number; pointsResetIn: number };
+      }>('query { rateLimitData { limitPerHour pointsSpentThisHour pointsResetIn } }', {});
+      return data.rateLimitData;
+    } catch (err) {
+      if (err instanceof WclV2RateLimitError) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  private waitForReset(limit: Awaited<ReturnType<RateBudget['limits']>>): Promise<void> {
+    this.pause ??= (async () => {
+      const waitMs = limit ? (limit.pointsResetIn + 5) * 1000 : RATE_LIMITED_WAIT_MS;
+      if (Date.now() + waitMs > deadline) {
+        throw new OutOfTime();
+      }
+      say(
+        `${limit ? `WCL budget at ${limit.pointsSpentThisHour}/${limit.limitPerHour} points` : 'WCL rate limited'}; waiting ${Math.ceil(waitMs / 60_000)} min`,
+      );
+      await sleep(waitMs);
+    })().finally(() => {
+      this.pause = null;
+    });
+    return this.pause;
   }
 }
 
@@ -384,22 +434,28 @@ const specName = (config: Config) => `${config.spec.wclSpecName} ${config.spec.w
 /**
  * The specs to rebuild, in order: `--spec` entries in the order given, then every other spec with
  * `--all`; without either, the classes scheduled for today, then specs not completed within
- * `STALE_AFTER_MS` (a failed or cut-short run, or a spec never built), oldest first.
+ * `STALE_AFTER_MS` (a failed or cut-short run, or a spec never built), oldest first, with any
+ * `--first` ones moved to the front.
  */
 function specsToBuild(status: BenchmarkStatus): Config[] {
   const withApl = configs.filter(
     (config) => config.parser !== undefined && hasSimcApl(config.spec.id),
   );
+  /** Specs matching each name, in the order named. */
+  const named = (names: string[], from: Config[]) => [
+    ...new Set(
+      names.flatMap((wanted) =>
+        from.filter((config) => {
+          const { wclClassName, wclSpecName } = config.spec;
+          return [wclClassName, wclSpecName, `${wclClassName}:${wclSpecName}`].some(
+            (name) => name.toLowerCase() === wanted.toLowerCase(),
+          );
+        }),
+      ),
+    ),
+  ];
   if (args.all || args.spec.length > 0) {
-    const named = args.spec.flatMap((wanted) =>
-      withApl.filter((config) => {
-        const { wclClassName, wclSpecName } = config.spec;
-        return [wclClassName, wclSpecName, `${wclClassName}:${wclSpecName}`].some(
-          (name) => name.toLowerCase() === wanted.toLowerCase(),
-        );
-      }),
-    );
-    const ordered = [...new Set(named)];
+    const ordered = named(args.spec, withApl);
     return args.all ? [...ordered, ...withApl.filter((c) => !ordered.includes(c))] : ordered;
   }
   const today = new Date().getUTCDay();
@@ -413,7 +469,9 @@ function specsToBuild(status: BenchmarkStatus): Config[] {
   say(
     `${WEEKDAY_NAMES[today]}: ${scheduled.length} scheduled specs, ${stale.length} stale ones to catch up`,
   );
-  return [...scheduled, ...stale];
+  const due = [...scheduled, ...stale];
+  const first = named(args.first, due);
+  return [...first, ...due.filter((c) => !first.includes(c))];
 }
 
 async function fetchText(url: string): Promise<string> {
@@ -501,9 +559,10 @@ async function snapshotOf(
     stats.reused += 1;
     return cached;
   }
-  await budget.ensure();
   try {
-    const snapshot = await withTimeout(parseLogSnapshot(config, ref), LOG_TIMEOUT_MS, logKey(ref));
+    const snapshot = await budget.retry(() =>
+      withTimeout(parseLogSnapshot(config, ref), LOG_TIMEOUT_MS, logKey(ref)),
+    );
     if (snapshot) {
       cache.set(cacheKey, snapshot);
       stats.parsed += 1;
@@ -530,16 +589,14 @@ async function publishBundle(
   budget: RateBudget,
 ): Promise<BundleStatus | null> {
   const { spec } = config;
-  await budget.ensure();
-  const rankings = await fetchRankingsPool(
-    {
+  const rankings = await budget.retry(() =>
+    fetchRankingsPool({
       encounterId: encounter.id,
       difficulty,
       className: spec.wclClassName,
       specName: spec.wclSpecName,
       metric: spec.role === ROLES.HEALER ? 'hps' : 'dps',
-    },
-    REFERENCE_PERCENTILE,
+    }),
   );
   if (!rankings.top) {
     return null;
@@ -607,6 +664,7 @@ async function buildSpec(
     bundles: previous?.bundles ?? [],
   };
   status.specs[config.spec.id] = entry;
+  let failures = 0;
   for (const difficulty of difficulties) {
     for (const encounter of encounters) {
       const label = `${specName(config)}, ${encounter.name ?? encounter.id}, difficulty ${difficulty}`;
@@ -634,13 +692,15 @@ async function buildSpec(
           throw err;
         }
         stats.failedBosses += 1;
+        failures += 1;
         say(`${label}: ${(err as Error).message}`);
       }
     }
   }
   // Bosses no longer in the current raid drop out of the summary.
   entry.bundles = entry.bundles.filter((b) => encounters.some((e) => e.id === b.encounterId));
-  entry.completedAt = Date.now();
+  // A spec with failed bosses stays incomplete, so the next run's catch-up retries it.
+  entry.completedAt = failures === 0 ? Date.now() : null;
 }
 
 async function main() {
@@ -654,10 +714,9 @@ async function main() {
   const budget = new RateBudget();
 
   const published = await store.get<BenchmarkStatus>(STATUS_KEY);
-  const status: BenchmarkStatus =
-    published?.snapshotVersion === SNAPSHOT_VERSION
-      ? published
-      : { snapshotVersion: SNAPSHOT_VERSION, updatedAt: 0, specs: {} };
+  const status: BenchmarkStatus = isCurrentStatus(published)
+    ? published
+    : { snapshotVersion: SNAPSHOT_VERSION, version: STATUS_VERSION, updatedAt: 0, specs: {} };
   const saveStatus = async () => {
     status.updatedAt = Date.now();
     await store.put(STATUS_KEY, status);

@@ -17,6 +17,12 @@ import type { ReferenceBand } from './reference';
  */
 export const SNAPSHOT_VERSION = 6;
 
+/**
+ * Bump when what the status records changes meaning, e.g. how reference logs are chosen or when a
+ * spec counts as complete. The job then ignores the old status, so every spec is due for a rebuild.
+ */
+export const STATUS_VERSION = 2;
+
 export interface PublishedProfile {
   snapshotVersion: number;
   profile: Profile;
@@ -78,6 +84,7 @@ export interface SpecStatus {
 /** What the job last did for each spec, for the specs page. */
 export interface BenchmarkStatus {
   snapshotVersion: number;
+  version: number;
   updatedAt: number;
   /** By spec ID. */
   specs: Record<string, SpecStatus>;
@@ -150,8 +157,11 @@ export async function fetchBenchmarkBundle(
   return bundle?.snapshotVersion === SNAPSHOT_VERSION ? bundle : null;
 }
 
+export const isCurrentStatus = (status: BenchmarkStatus | null): status is BenchmarkStatus =>
+  status?.snapshotVersion === SNAPSHOT_VERSION && status.version === STATUS_VERSION;
+
 /** The job's status summary, or null if none is published. */
 export async function fetchBenchmarkStatus(): Promise<BenchmarkStatus | null> {
   const status = await getJson<BenchmarkStatus>(STATUS_KEY);
-  return status?.snapshotVersion === SNAPSHOT_VERSION ? status : null;
+  return isCurrentStatus(status) ? status : null;
 }

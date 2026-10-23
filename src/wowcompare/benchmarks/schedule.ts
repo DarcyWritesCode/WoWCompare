@@ -35,7 +35,7 @@ export const UPDATE_DAYS: Record<string, Weekday> = {
 };
 
 /** When the job starts each day, in UTC; keep in step with .github/workflows/benchmarks.yml. */
-export const RUN_TIME_UTC = { hour: 9, minute: 17 };
+export const RUN_TIME_UTC = { hour: 23, minute: 47 };
 
 /**
  * A class's update day. A class missing from `UPDATE_DAYS` (e.g. new in an expansion) still gets

@@ -12,7 +12,7 @@ export default function BiggestMistakes({
 }: {
   mistakes: Mistake[];
   fightDps: number;
-  /** e.g. "the 90th percentile median". */
+  /** e.g. "the 90–95th percentile median". */
   referenceLabel: string;
 }) {
   if (mistakes.length === 0) {

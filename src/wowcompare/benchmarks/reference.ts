@@ -6,17 +6,17 @@ import { median } from './aggregate';
 import type { RankedParse } from './rankings';
 
 /**
- * What a player is measured against: the median of logs around this percentile of all parses for
- * the spec, boss and difficulty. The top few parses are mostly groups set up to pump one player
- * (Power Infusion, Augmentation, short kills), which makes advice drawn from them unreachable.
+ * What a player is measured against: the median of logs spread over this percentile range of all
+ * parses for the spec, boss and difficulty. The top few parses are mostly groups set up to pump one
+ * player (Power Infusion, Augmentation, short kills), which makes advice drawn from them
+ * unreachable.
  */
-export const REFERENCE_PERCENTILE = 90;
-/** Logs the reference median is taken over. */
-export const REFERENCE_SIZE = 10;
+export const REFERENCE_BAND = { from: 90, to: 95 } as const;
+export const REFERENCE_LABEL = `${REFERENCE_BAND.from}–${REFERENCE_BAND.to}th percentile`;
 /**
- * Parses picked around the target rank, so `REFERENCE_SIZE` are left after leaving out
- * externally buffed logs (when the viewer asks) and logs that fail to parse. About a third of
- * 90th-percentile logs are buffed (Feral, Heroic, October 2026).
+ * Logs parsed per boss, evenly spread over the band. Parsing the whole band would take thousands
+ * of logs per spec, far past WCL's hourly point budget; a median of 20 spread logs lands within a
+ * few percent of the band's. About a third are externally buffed (Feral, Heroic, October 2026).
  */
 export const REFERENCE_CANDIDATES = 20;
 /** With fewer unbuffed candidates than this, the reference keeps the buffed ones. */
@@ -54,22 +54,36 @@ export const isExternallyBuffed = (snapshot: LogSnapshot) =>
   uptimeOf(snapshot, AUGMENTATION_BUFFS) >= AUGMENTATION_MIN_UPTIME;
 
 export interface ReferenceBand {
-  percentile: number;
   /** Ranked parses for the spec, boss and difficulty; null when unknown (v1 mode). */
   totalParses: number | null;
-  /** The rank aimed for; the deepest fetched rank when the target is out of reach. */
-  targetRank: number;
-  /** Parses nearest `targetRank` (short kills left out), nearest first. */
+  /** Ranks spanning the band, best first; the deepest fetched when the band is out of reach. */
+  ranks: [number, number];
+  /** Parses spread evenly over `ranks` (short kills left out), best first. */
   candidates: RankedParse[];
 }
 
 /** The rank at `percentile`: e.g. the 90th percentile of 3,000 parses is rank 300. */
-export const rankAtPercentile = (totalParses: number, percentile: number) =>
+const rankAtPercentile = (totalParses: number, percentile: number) =>
   Math.max(1, Math.round(totalParses * (1 - percentile / 100)));
 
 /** Share of parses at or below `rank`, as a percentile. */
 export const percentileOfRank = (rank: number, totalParses: number) =>
   Math.max(0, Math.min(100, 100 * (1 - rank / totalParses)));
+
+/**
+ * The ranks to take candidates at: `REFERENCE_CANDIDATES` evenly spread over the band, no deeper
+ * than `deepest`. Without a total, only `deepest` (the deepest parses stand in for the band).
+ */
+export function targetRanks(totalParses: number | null, deepest: number): number[] {
+  if (totalParses === null) {
+    return [deepest];
+  }
+  const best = Math.min(rankAtPercentile(totalParses, REFERENCE_BAND.to), deepest);
+  const worst = Math.min(rankAtPercentile(totalParses, REFERENCE_BAND.from), deepest);
+  return Array.from({ length: REFERENCE_CANDIDATES }, (_, i) =>
+    Math.round(best + ((worst - best) * i) / (REFERENCE_CANDIDATES - 1)),
+  );
+}
 
 /** Parses whose kill is far shorter than is typical for the pool. */
 function withoutShortKills(pool: RankedParse[]): RankedParse[] {
@@ -83,24 +97,26 @@ function withoutShortKills(pool: RankedParse[]): RankedParse[] {
 }
 
 /**
- * The candidates for the reference median from `pool` (ranked parses around the target rank, best
- * first). Without a total, or when the target is past the deepest fetched rank (WCL serves 2,000
- * at most), the deepest parses stand in.
+ * The candidates for the reference median from `pool` (ranked parses covering the band, best
+ * first): for each of `targetRanks`, the nearest parse not already taken.
  */
-export function selectReference(
-  pool: RankedParse[],
-  totalParses: number | null,
-  percentile = REFERENCE_PERCENTILE,
-): ReferenceBand {
+export function selectReference(pool: RankedParse[], totalParses: number | null): ReferenceBand {
   const deepest = pool.reduce((max, parse) => Math.max(max, parse.rank), 0);
-  const targetRank =
-    totalParses === null ? deepest : Math.min(rankAtPercentile(totalParses, percentile), deepest);
-  const candidates = withoutShortKills(pool)
-    .map((parse) => ({ parse, distance: Math.abs(parse.rank - targetRank) }))
-    .sort((a, b) => a.distance - b.distance || a.parse.rank - b.parse.rank)
-    .slice(0, REFERENCE_CANDIDATES)
-    .map(({ parse }) => parse);
-  return { percentile, totalParses, targetRank, candidates };
+  const targets = targetRanks(totalParses, deepest);
+  const available = withoutShortKills(pool);
+  const candidates: RankedParse[] = [];
+  // Several targets can share a nearest parse when the band is narrow; each takes the next one.
+  const wanted = targets.length === 1 ? Array(REFERENCE_CANDIDATES).fill(targets[0]) : targets;
+  for (const target of wanted) {
+    const nearest = available
+      .filter((parse) => !candidates.includes(parse))
+      .sort((a, b) => Math.abs(a.rank - target) - Math.abs(b.rank - target) || a.rank - b.rank)[0];
+    if (nearest) {
+      candidates.push(nearest);
+    }
+  }
+  candidates.sort((a, b) => a.rank - b.rank);
+  return { totalParses, ranks: [targets[0], targets[targets.length - 1]], candidates };
 }
 
 export interface ReferencePick<T> {
@@ -112,8 +128,8 @@ export interface ReferencePick<T> {
 }
 
 /**
- * The logs the reference median is taken over: the first `REFERENCE_SIZE` parsed candidates,
- * leaving out externally buffed ones when `excludeBuffed` (unless too few would remain).
+ * The logs the reference median is taken over: every parsed candidate, leaving out externally
+ * buffed ones when `excludeBuffed` (unless too few would remain).
  */
 export function pickReference<T>(
   candidates: T[],
@@ -126,7 +142,7 @@ export function pickReference<T>(
   const keptBuffed = leaveOut && unbuffed.length < MIN_UNBUFFED;
   const pool = leaveOut && !keptBuffed ? unbuffed : parsed;
   return {
-    picked: pool.slice(0, REFERENCE_SIZE),
+    picked: pool,
     leftOut: pool === unbuffed ? parsed.length - unbuffed.length : 0,
     keptBuffed,
   };

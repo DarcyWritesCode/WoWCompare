@@ -4,11 +4,8 @@ import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
-import {
-  AUGMENTATION_MIN_UPTIME,
-  POWER_INFUSION_MIN_UPTIME,
-  REFERENCE_SIZE,
-} from '../benchmarks/reference';
+import { AUGMENTATION_MIN_UPTIME, POWER_INFUSION_MIN_UPTIME } from '../benchmarks/reference';
+import { CLOSE_COUNT } from '../benchmarks/select';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
 import { classSpellMatcher } from '../simc/specs';
@@ -29,7 +26,7 @@ import WindowReels from './WindowReels';
 const LOAD_HINTS: Partial<Record<BenchmarkKind, string>> = {
   sameBuild: 'Same build (1 log)',
   bestClose: 'Best close parse (1 log)',
-  close: `Close median (up to ${REFERENCE_SIZE} logs)`,
+  close: `Close median (up to ${CLOSE_COUNT} logs)`,
 };
 
 const NORMALIZATION_KEY = 'wowcompare:normalization';
@@ -421,7 +418,7 @@ export default function ProfileView({
 
           <Panel
             title="Benchmarks"
-            explanation={`Scored against ${reference.label}: ${reference.description}. #1 is shown as the ceiling. Same build and close come from the ${poolSize} ranked parses around the reference. Close = ilvl ±5, kill time ±20%, raid size ±5.`}
+            explanation={`Scored against ${reference.label}: ${reference.description}. #1 is shown as the ceiling. Same build and close come from the ${poolSize} ranked parses on the reference's rankings pages. Close = ilvl ±5, kill time ±20%, raid size ±5.`}
           >
             <BenchmarkTable player={{ ...snapshot, results }} benchmarks={columns} />
           </Panel>

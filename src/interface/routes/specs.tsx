@@ -6,7 +6,7 @@ import Config from 'parser/Config';
 import { useLingui } from '@lingui/react';
 import { useMemo } from 'react';
 import GameBranch from 'game/GameBranch';
-import { REFERENCE_PERCENTILE } from 'wowcompare/benchmarks/reference';
+import { REFERENCE_LABEL } from 'wowcompare/benchmarks/reference';
 
 import SpecListItem from '../SpecListItem';
 import '../SpecList.css';
@@ -68,7 +68,7 @@ export function Component() {
           Click any specialization to view an example report for that spec.
         </Trans>{' '}
         Live Compare rebuilds each class's benchmarks once a week, on the day shown on its specs,
-        against parses around the {REFERENCE_PERCENTILE}th percentile.
+        against parses spread over the {REFERENCE_LABEL}.
       </small>
 
       <div>

@@ -7,6 +7,14 @@ const ENDPOINTS = {
 
 export class WclV2AuthRequiredError extends Error {}
 
+/** WCL's hourly point budget (or a burst limit) is used up. */
+export class WclV2RateLimitError extends Error {
+  constructor() {
+    super('Warcraft Logs API error (429): rate limited');
+    this.name = 'WclV2RateLimitError';
+  }
+}
+
 export class WclV2GraphqlError extends Error {
   constructor(readonly messages: string[]) {
     super(messages.join('; '));
@@ -37,6 +45,9 @@ export async function wclQuery<T>(query: string, variables: Record<string, unkno
   });
   if (response.status === 401) {
     throw new WclV2AuthRequiredError();
+  }
+  if (response.status === 429) {
+    throw new WclV2RateLimitError();
   }
   const json = (await response.json()) as { data?: T; errors?: { message: string }[] };
   if (json.errors?.length) {

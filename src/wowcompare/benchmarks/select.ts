@@ -1,5 +1,5 @@
 import { RankedParse, RankingsPool } from './rankings';
-import { REFERENCE_SIZE, ReferenceBand, selectReference } from './reference';
+import { ReferenceBand, selectReference } from './reference';
 
 /** The analyzed log's context, matched against ranked parses. */
 export interface PlayerContext {
@@ -19,6 +19,9 @@ export interface CloseBounds {
 
 export const DEFAULT_CLOSE_BOUNDS: CloseBounds = { ilvl: 5, duration: 0.2, raidSize: 5 };
 
+/** Parses in the "close" median. */
+export const CLOSE_COUNT = 10;
+
 /** Below this talent similarity a "same build" match is shown as approximate. */
 export const SAME_BUILD_THRESHOLD = 0.95;
 
@@ -36,11 +39,11 @@ export interface CloseMatch {
 export interface BenchmarkSelection {
   /** The #1 parse, shown as the ceiling; nothing is scored against it once the reference loads. */
   top: RankedParse | undefined;
-  /** The parses around `REFERENCE_PERCENTILE` the player is scored against. */
+  /** The parses spread over `REFERENCE_BAND` the player is scored against. */
   reference: ReferenceBand;
   sameBuild: BuildMatch | undefined;
   bestClose: CloseMatch | undefined;
-  /** Up to `REFERENCE_SIZE` parses closest to the player's ilvl, kill time and raid size. */
+  /** Up to `CLOSE_COUNT` parses closest to the player's ilvl, kill time and raid size. */
   close: CloseMatch[];
 }
 
@@ -70,8 +73,8 @@ function closeness(parse: RankedParse, player: PlayerContext, bounds: CloseBound
 }
 
 /**
- * Picks the five benchmarks. Same build and close parses come from the pool around the reference
- * rank, so they're held to the same realistic level.
+ * Picks the five benchmarks. Same build and close parses come from the rankings pages covering
+ * the reference band, so they're held to the same realistic level.
  */
 export function selectBenchmarks(
   { top, pool, totalParses }: RankingsPool,
@@ -96,7 +99,7 @@ export function selectBenchmarks(
   const close: CloseMatch[] = [
     ...inBounds.map((parse) => ({ parse, withinBounds: true })),
     ...fill.map((parse) => ({ parse, withinBounds: false })),
-  ].slice(0, REFERENCE_SIZE);
+  ].slice(0, CLOSE_COUNT);
 
   return {
     top,

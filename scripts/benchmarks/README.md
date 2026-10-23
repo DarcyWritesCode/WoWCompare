@@ -1,6 +1,6 @@
 # Benchmarks
 
-Live Compare scores a log against the median of parses around the **90th percentile** for its
+Live Compare scores a log against the median of 20 parses spread over the **90–95th percentile** for its
 spec, boss and difficulty, and shows the #1 parse as the ceiling. Parsing those logs in the
 viewer's browser is slow, so a GitHub Actions job (`.github/workflows/benchmarks.yml`) does it
 once for everyone. It runs daily and rebuilds each class once a week, on its day in
@@ -25,16 +25,16 @@ See `src/wowcompare/benchmarks/reference.ts`.
 - **Why not the top 10.** The top parses are mostly groups set up to pump one player: Power
   Infusion, an Augmentation Evoker, short kills. Advice drawn from them is out of reach for most
   players.
-- **Finding the 90th percentile.** WCL's rankings list has no total and stops at rank 2,000. The
-  ranks WCL gives the #1 log's players include `totalParses`, so the target rank is
-  `totalParses × 10%`. The job fetches the rankings pages around it. If the target is past rank
-  2,000, the deepest ranks stand in.
-- **Candidates.** The 20 parses nearest the target rank. Kills more than 3 MADs shorter than
-  usual are left out first.
+- **Finding the band.** WCL's rankings list has no total and stops at rank 2,000. The ranks WCL
+  gives the #1 log's players include `totalParses`, so the band is ranks `totalParses × 5%` to
+  `× 10%`. The job fetches only the rankings pages holding its target ranks. If the band is past
+  rank 2,000 (over 40,000 parses), the deepest ranks stand in.
+- **Candidates.** 20 parses at evenly spaced ranks across the band (the whole band can be
+  thousands of logs per spec, far past WCL's point budget). Kills more than 3 MADs shorter than
+  usual are left out first. The median uses every candidate that parsed.
 - **PI/Aug toggle.** Each log records the Power Infusion, Ebon Might and Prescience others put on
   the player. "Leave out PI/Aug-buffed logs" (on by default) drops logs over the thresholds from
-  the median. With fewer than 5 left, it keeps them. About a third of reference logs are buffed,
-  hence 20 candidates for a median of 10.
+  the median. With fewer than 5 left, it keeps them. About a third of candidates are buffed.
 
 ## Why this design
 
@@ -76,12 +76,16 @@ See `src/wowcompare/benchmarks/reference.ts`.
 ## Limits to watch
 
 - **WCL points.** About 5.4 points per parsed log, so roughly 650 logs an hour within the
-  3,600-point budget. The job checks `rateLimitData` every 30s and waits for the hourly reset
-  before using the last 5%. A day is up to 6 specs × 10 bosses × 2 difficulties × 21 logs
+  3,600-point budget, shared with anything else using the same API client (including local runs).
+  The job checks `rateLimitData` every 15s and pauses every worker for the hourly reset before
+  using the last 10%. If WCL still answers 429, it waits for the reset and retries. A day is up to 6 specs × 10 bosses × 2 difficulties × 21 logs
   ≈ 2,500 logs, about 4 hours. Logs already parsed with the same profile come from
   `actions/cache` and cost nothing.
 - **Time.** Parsing stops at `--max-minutes` (330), and whatever is left waits for the daily
-  catch-up.
+  catch-up. A spec only counts as complete when every boss built; otherwise the next run retries
+  it. Changing what "complete" means (e.g. how reference logs are chosen) needs a bump of
+  `STATUS_VERSION` in `published.ts`, which makes every spec due again.
+- **Run time.** Daily at 23:47 UTC (`RUN_TIME_UTC` in `schedule.ts`, and the workflow's cron).
 - **KV writes.** The free plan allows 1,000 a day. A day writes one profile and about 20 bundles
   per spec, plus the status entry after each spec: roughly 130. Entries expire after 21 days, so
   a class that misses two weeks drops out rather than going stale.
@@ -99,6 +103,6 @@ With credentials (`WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` in the environment), b
 override. You can then leave out `--encounter` to get the current raid.
 
 Options: `--spec` (repeatable, in order: `Druid`, `Feral` or `Druid:Feral`), `--all` (every spec,
-after any `--spec` ones), `--encounter`, `--difficulty`, `--max-minutes`, `--concurrency` (logs
-fetched at once, default 4), `--cache-dir`. Without `--spec` or `--all`, the schedule decides.
+after any `--spec` ones), `--first` (with the schedule: due specs to build first), `--encounter`,
+`--difficulty`, `--max-minutes`, `--concurrency` (logs fetched at once, default 4), `--cache-dir`. Without `--spec` or `--all`, the schedule decides.
 `GITHUB_TOKEN`, if set, is used to look up SimC commit dates.

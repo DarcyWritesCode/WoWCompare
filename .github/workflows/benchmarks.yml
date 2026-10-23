@@ -7,7 +7,7 @@ name: Benchmarks
 on:
   schedule:
     # Keep in step with RUN_TIME_UTC in schedule.ts (shown on the specs page).
-    - cron: '17 9 * * *'
+    - cron: '47 23 * * *'
   workflow_dispatch:
     inputs:
       args:
@@ -51,7 +51,9 @@ jobs:
       - id: run
         run: pnpm run benchmarks:run $ARGS
         env:
-          ARGS: ${{ inputs.args }}
+          # Scheduled runs take BENCHMARK_ARGS (a repository variable), e.g. `--first Druid` to
+          # choose the order of a first release.
+          ARGS: ${{ inputs.args || vars.BENCHMARK_ARGS }}
           WCL_CLIENT_ID: ${{ secrets.WCL_CLIENT_ID }}
           WCL_CLIENT_SECRET: ${{ secrets.WCL_CLIENT_SECRET }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

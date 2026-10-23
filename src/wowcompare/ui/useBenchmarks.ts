@@ -9,7 +9,7 @@ import { fetchRankingsPool, RankedParse, RankingsQuery } from '../benchmarks/ran
 import {
   percentileOfRank,
   pickReference,
-  REFERENCE_PERCENTILE,
+  REFERENCE_LABEL,
   ReferencePick,
 } from '../benchmarks/reference';
 import {
@@ -111,7 +111,7 @@ const AUTO_LOADED: BenchmarkKind[] = ['top', 'reference'];
 
 export const BENCHMARK_LABELS: Record<BenchmarkKind, string> = {
   top: '#1',
-  reference: `${REFERENCE_PERCENTILE}th percentile median`,
+  reference: `${REFERENCE_LABEL} median`,
   sameBuild: 'Same build',
   bestClose: 'Best close',
   close: 'Close median',
@@ -119,12 +119,12 @@ export const BENCHMARK_LABELS: Record<BenchmarkKind, string> = {
 
 /**
  * What the player is measured against: the median of the reference logs (around
- * `REFERENCE_PERCENTILE`) once loaded, else the #1 parse.
+ * `REFERENCE_BAND`) once loaded, else the #1 parse.
  */
 export interface BenchmarkReference {
-  /** e.g. "the 90th percentile median", "the #1 parse". */
+  /** e.g. "the 90–95th percentile median", "the #1 parse". */
   label: string;
-  /** Which logs, e.g. "10 logs, ranks 290–310 of 3,183; 3 with PI/Aug left out". */
+  /** Which logs, e.g. "14 logs, ranks 160–318 of 3,183 (90–95th percentile)". */
   description: string;
   logs: LogSnapshot[];
   /** Metric-by-metric medians of `logs`. */
@@ -146,7 +146,7 @@ function parsesFor(selection: BenchmarkSelection, kind: BenchmarkKind): RankedPa
   }
 }
 
-/** e.g. "10 logs, ranks 290–310 of 3,183 (90th percentile); 3 with PI/Aug left out". */
+/** e.g. "14 logs, ranks 160–318 of 3,183 (90–95th percentile); 6 with PI/Aug buffs left out". */
 function describeReference(
   selection: BenchmarkSelection,
   pick: ReferencePick<RankedParse>,
@@ -161,7 +161,7 @@ function describeReference(
     parts[0] += `, ranks ${low}–${high}`;
     if (totalParses) {
       const pct = (rank: number) => Math.floor(percentileOfRank(rank, totalParses));
-      parts[0] += ` of ${formatNumber(totalParses)} (${pct(high)}th–${pct(low)}th percentile)`;
+      parts[0] += ` of ${formatNumber(totalParses)} (${pct(high)}–${pct(low)}th percentile)`;
     } else {
       parts[0] += ' (the deepest ranks available; total parses unknown)';
     }
@@ -240,9 +240,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
           query.encounterId,
           query.difficulty,
         );
-        const rankings = bundle?.top
-          ? bundle
-          : await fetchRankingsPool(query, REFERENCE_PERCENTILE);
+        const rankings = bundle?.top ? bundle : await fetchRankingsPool(query);
         let next = selectBenchmarks(rankings, inputs.player);
         if (bundle?.top) {
           // The candidates the job parsed, even if selection has changed since.

@@ -7,7 +7,7 @@ import {
   fetchBenchmarkStatus,
   SpecStatus,
 } from '../benchmarks/published';
-import { REFERENCE_PERCENTILE } from '../benchmarks/reference';
+import { REFERENCE_LABEL } from '../benchmarks/reference';
 import { nextRun, runTimeUtc, updateDay, WEEKDAY_NAMES } from '../benchmarks/schedule';
 import { hasSimcApl } from '../profile/registry';
 
@@ -138,7 +138,7 @@ export default function LiveCompareStatus({
       </div>
       {spec && spec.bundles.length > 0 ? (
         <div>
-          {spec.bundles.length} boss × difficulty benchmarks · {REFERENCE_PERCENTILE}th percentile
+          {spec.bundles.length} boss × difficulty benchmarks · {REFERENCE_LABEL}
           {parses.length > 0 &&
             ` of ${formatNumber(Math.min(...parses))}–${formatNumber(Math.max(...parses))} parses`}{' '}
           · {logs} logs{buffed > 0 && ` (${buffed} with PI/Aug)`}{' '}
