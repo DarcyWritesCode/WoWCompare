@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { medianResults, rescoreAgainst } from '../benchmarks/aggregate';
 import { parseBenchmarkLog } from '../benchmarks/parseLog';
+import { fetchBenchmarkBundle, logKey, profileFingerprint } from '../benchmarks/published';
 import { fetchRankings, RankedParse, RankingsQuery } from '../benchmarks/rankings';
 import {
   BenchmarkSelection,
@@ -144,12 +145,21 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
   const [parsed, setParsed] = useState<Map<RankedParse, LogSnapshot | null>>(new Map());
   const [loaded, setLoaded] = useState<BenchmarkKind[]>([]);
   const started = useRef(false);
+  // Read by `load`, which the mount effect calls from its first render's closure.
+  const parsedRef = useRef(parsed);
+  const busyRef = useRef(false);
+
+  const addParsed = (fresh: Map<RankedParse, LogSnapshot | null>) => {
+    parsedRef.current = new Map([...parsedRef.current, ...fresh]);
+    setParsed(parsedRef.current);
+  };
 
   const load = async (kind: BenchmarkKind, current = selection) => {
-    if (!inputs || !current || busy) {
+    if (!inputs || !current || busyRef.current) {
       return;
     }
-    const parses = parsesFor(current, kind).filter((p) => !parsed.has(p));
+    const parses = parsesFor(current, kind).filter((p) => !parsedRef.current.has(p));
+    busyRef.current = true;
     setBusy(true);
     try {
       let done = 0;
@@ -158,12 +168,13 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
         done += 1;
         setStatus(`Loading ${BENCHMARK_LABELS[kind]}: ${done} / ${parses.length} logs`);
       });
-      setParsed((previous) => new Map([...previous, ...fresh]));
+      addParsed(fresh);
       setLoaded((previous) => (previous.includes(kind) ? previous : [...previous, kind]));
       setStatus(null);
     } catch (err) {
       setStatus(`Failed to load ${BENCHMARK_LABELS[kind]}: ${(err as Error).message}`);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -177,11 +188,29 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
     (async () => {
       try {
         setStatus('Fetching rankings…');
-        const rankings = await fetchRankings(inputs.query);
+        const { config, profile, query } = inputs;
+        // The nightly job's rankings and parsed top 10, when it has covered this boss.
+        const bundle = await fetchBenchmarkBundle(
+          config.spec.id,
+          query.encounterId,
+          query.difficulty,
+        );
+        const rankings = bundle?.rankings.length ? bundle.rankings : await fetchRankings(query);
+        // Its snapshots only count if they were parsed with this exact profile.
+        if (bundle && bundle.profileFingerprint === profileFingerprint(profile)) {
+          addParsed(
+            new Map(
+              rankings.flatMap((parse): [RankedParse, LogSnapshot][] => {
+                const snapshot = bundle.snapshots[logKey({ ...parse, playerName: parse.name })];
+                return snapshot ? [[parse, snapshot]] : [];
+              }),
+            ),
+          );
+        }
         const next = selectBenchmarks(rankings, inputs.player);
         setRankingCount(rankings.length);
         setSelection(next);
-        // #1 first so something shows quickly, then the top 10 (usually cached server-side).
+        // #1 first so something shows quickly, then the top 10 (usually already published).
         await load('top', next);
         await load('top10', next);
       } catch (err) {

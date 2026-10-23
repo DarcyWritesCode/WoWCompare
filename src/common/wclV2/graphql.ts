@@ -1,6 +1,9 @@
-import { getAccessToken } from './auth';
+import { getAccessToken, getTokenKind } from './auth';
 
-const USER_ENDPOINT = 'https://www.warcraftlogs.com/api/v2/user';
+const ENDPOINTS = {
+  user: 'https://www.warcraftlogs.com/api/v2/user',
+  client: 'https://www.warcraftlogs.com/api/v2/client',
+};
 
 export class WclV2AuthRequiredError extends Error {}
 
@@ -24,7 +27,7 @@ export async function wclQuery<T>(query: string, variables: Record<string, unkno
     throw new WclV2AuthRequiredError();
   }
 
-  const response = await fetch(token ? USER_ENDPOINT : proxy!, {
+  const response = await fetch(token ? ENDPOINTS[getTokenKind()] : proxy!, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

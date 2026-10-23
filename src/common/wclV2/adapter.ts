@@ -7,8 +7,10 @@ import { QueryParams } from 'common/makeApiUrl';
 import { EnemyInfo } from 'parser/core/Enemy';
 import { WCLFight } from 'parser/core/Fight';
 import { PetInfo } from 'parser/core/Pet';
-import { PlayerInfo } from 'parser/core/Player';
+import { PlayerDetails, PlayerInfo } from 'parser/core/Player';
 import { WCLReport } from 'parser/core/Report';
+
+import SPECS from 'game/SPECS';
 
 import { wclQuery } from './graphql';
 
@@ -367,4 +369,76 @@ export async function fetchV1Endpoint(endpoint: string, params: QueryParams): Pr
   }
 
   throw new Error(`The Warcraft Logs v2 adapter does not support "${parts[0]}/${parts[1]}" yet.`);
+}
+
+const PLAYER_DETAILS_QUERY = `
+query ($code: String!, $fight: Int!) {
+  reportData {
+    report(code: $code) {
+      region { compactName }
+      playerDetails(fightIDs: [$fight])
+    }
+  }
+}`;
+
+interface V2PlayerDetail {
+  id: number;
+  name: string;
+  guid: number;
+  type: string;
+  server?: string;
+  specs?: { spec: string }[];
+  minItemLevel?: number;
+  maxItemLevel?: number;
+}
+
+type V2PlayerDetailsByRole = Partial<Record<'tanks' | 'healers' | 'dps', V2PlayerDetail[]>>;
+
+const ROLE_OF: Record<keyof V2PlayerDetailsByRole, PlayerDetails['role']> = {
+  tanks: 'tank',
+  healers: 'healer',
+  dps: 'dps',
+};
+
+/**
+ * A fight's players with their roles and specs, in the shape of WoWAnalyzer's
+ * `v2/report/:code/fight/:id/players` endpoint (which v1 mode uses).
+ */
+export async function fetchPlayerDetails(code: string, fightId: number): Promise<PlayerDetails[]> {
+  const data = await wclQuery<{
+    reportData: {
+      report: {
+        region: { compactName: string } | null;
+        playerDetails: { data: { playerDetails: V2PlayerDetailsByRole } };
+      } | null;
+    };
+  }>(PLAYER_DETAILS_QUERY, { code, fight: fightId });
+  const report = data.reportData.report;
+  if (!report) {
+    throw new Error(`Report ${code} not found`);
+  }
+  const byRole = report.playerDetails.data.playerDetails;
+  return (Object.keys(ROLE_OF) as (keyof V2PlayerDetailsByRole)[]).flatMap((group) =>
+    (byRole[group] ?? []).map((player) => {
+      const specName = player.specs?.[0]?.spec;
+      const spec = Object.values(SPECS).find(
+        (s) => s.wclClassName === player.type && s.wclSpecName === specName,
+      );
+      return {
+        id: player.id,
+        name: player.name,
+        server: player.server ?? '',
+        region: report.region?.compactName ?? '',
+        ilvl:
+          player.minItemLevel !== undefined && player.maxItemLevel !== undefined
+            ? (player.minItemLevel + player.maxItemLevel) / 2
+            : undefined,
+        className: player.type,
+        specName,
+        specID: spec?.id,
+        role: ROLE_OF[group],
+        guid: player.guid,
+      };
+    }),
+  );
 }

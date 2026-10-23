@@ -53,7 +53,26 @@ function remove(storage: Storage, key: string) {
   }
 }
 
+/**
+ * A token handed in from outside the page: a parse worker gets the page's user token, the
+ * nightly benchmark job a client-credentials token (which WCL serves on a different endpoint).
+ */
+let injected: { token: string; kind: TokenKind } | null = null;
+
+export type TokenKind = 'user' | 'client';
+
+export function setAccessToken(token: string | null, kind: TokenKind = 'user') {
+  injected = token ? { token, kind } : null;
+}
+
+export function getTokenKind(): TokenKind {
+  return injected?.kind ?? 'user';
+}
+
 export function getAccessToken(): string | null {
+  if (injected) {
+    return injected.token;
+  }
   const token = readJson<StoredToken>(window.localStorage, TOKEN_KEY);
   if (!token || token.expiresAt <= Date.now()) {
     return null;

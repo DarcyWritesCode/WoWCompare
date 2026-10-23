@@ -110,7 +110,10 @@
     "preview": "vite build && vite preview",
     "format": "oxfmt",
     "format:check": "pnpm run format --check",
-    "build:pages": "vite build --mode pages"
+    "build:pages": "vite build --mode pages",
+    "benchmarks:build": "vite build --ssr scripts/benchmarks/build.ts --outDir node_modules/.cache/wc-benchmarks-dist --mode benchmarks",
+    "benchmarks:run": "node node_modules/.cache/wc-benchmarks-dist/build.js",
+    "benchmarks:typecheck": "tsc -p scripts/benchmarks"
   },
   "lint-staged": {
     "*": [

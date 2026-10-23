@@ -1,5 +1,7 @@
-import { fetchFights } from 'common/fetchWclApi';
+import { fetchFights, USE_WCL_V2 } from 'common/fetchWclApi';
 import makeApiUrl from 'common/makeApiUrl';
+import { fetchPlayerDetails } from 'common/wclV2/adapter';
+import { getAccessToken } from 'common/wclV2/auth';
 import { fetchPlayerEvents } from 'interface/report/hooks/useEvents';
 import Config from 'parser/Config';
 import CharacterProfile from 'parser/core/CharacterProfile';
@@ -13,7 +15,7 @@ import { LogSnapshot } from '../metrics/results';
 import { setProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
 import type { ParseRequest, ParseResponse } from './parseWorker';
-import { getCachedSnapshot, putCachedSnapshot, snapshotKey } from './snapshotCache';
+import { logKey, profileFingerprint } from './published';
 
 export interface LogRef {
   reportCode: string;
@@ -29,6 +31,18 @@ const cache = new Map<string, Promise<LogSnapshot | null>>();
 
 const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** The fight's players with their roles, from WCL directly in v2 mode, else WoWAnalyzer's API. */
+async function fetchPlayers(reportCode: string, fightId: number): Promise<PlayerDetails[]> {
+  if (USE_WCL_V2) {
+    return fetchPlayerDetails(reportCode, fightId);
+  }
+  const response = await fetch(makeApiUrl(`v2/report/${reportCode}/fight/${fightId}/players`));
+  if (!response.ok) {
+    throw new Error(`Players of ${reportCode} fight ${fightId}: HTTP ${response.status}`);
+  }
+  return ((await response.json()) as { players: PlayerDetails[] }).players;
+}
+
 /** Fetches and parses one log in the current thread. */
 export async function parseLogSnapshot(config: Config, ref: LogRef): Promise<LogSnapshot | null> {
   const report: Report = {
@@ -41,18 +55,17 @@ export async function parseLogSnapshot(config: Config, ref: LogRef): Promise<Log
     throw new Error(`Fight ${ref.fightId} not found in ${ref.reportCode}`);
   }
 
-  const { players }: { players: PlayerDetails[] } = await fetch(
-    makeApiUrl(`v2/report/${ref.reportCode}/fight/${ref.fightId}/players`),
-  ).then((res) => res.json());
+  const players = await fetchPlayers(ref.reportCode, ref.fightId);
   const named = players.filter((p) => p.name === ref.playerName);
   const player = named.find((p) => p.server === ref.serverName) ?? named[0];
   if (!player) {
     throw new Error(`${ref.playerName} not found in ${ref.reportCode} fight ${ref.fightId}`);
   }
 
-  let events: AnyEvent[] = [];
+  const events: AnyEvent[] = [];
   for await (const range of fetchPlayerEvents(report, fight, player)) {
-    events = events.concat(range.events);
+    // Not push(...events): a long page would overflow the argument limit.
+    range.events.forEach((event) => events.push(event));
   }
   const combatantInfo = events.find(
     (event): event is CombatantInfoEvent =>
@@ -180,6 +193,7 @@ function send(id: number, request: Omit<PendingRequest, 'timer'>) {
     specId: request.config.spec.id,
     profile: request.profile,
     ref: request.ref,
+    wclToken: getAccessToken(),
   } satisfies ParseRequest);
 }
 
@@ -200,37 +214,21 @@ function parseInWorker(config: Config, profile: Profile, ref: LogRef): Promise<L
   });
 }
 
-/** The shared server cache first; otherwise parse here and share the result for the next viewer. */
-async function fromServerOrParse(
-  config: Config,
-  profile: Profile,
-  ref: LogRef,
-): Promise<LogSnapshot | null> {
-  const key = snapshotKey(profile, ref);
-  const cached = await getCachedSnapshot(key);
-  if (cached) {
-    return cached;
-  }
-  const snapshot = await parseInWorker(config, profile, ref);
-  if (snapshot) {
-    putCachedSnapshot(key, snapshot);
-  }
-  return snapshot;
-}
-
 /**
- * Runs one benchmark log through the same parser and profile as the analyzed log, in a
- * Web Worker, unless the shared server cache has it. Results are also kept for the session.
+ * Runs one benchmark log through the same parser and profile as the analyzed log, in a Web
+ * Worker. Results are kept for the session. (The nightly job's published top-10 snapshots are
+ * used instead where they match the profile; see `useBenchmarks`.)
  */
 export function parseBenchmarkLog(
   config: Config,
   profile: Profile,
   ref: LogRef,
 ): Promise<LogSnapshot | null> {
-  const key = `${profile.id}@${profile.version}:${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
+  // By fingerprint, not version: an accepted suggestion changes the profile but not its version.
+  const key = `${profileFingerprint(profile)}:${logKey(ref)}`;
   let result = cache.get(key);
   if (!result) {
-    result = fromServerOrParse(config, profile, ref);
+    result = parseInWorker(config, profile, ref);
     result.catch(() => cache.delete(key));
     cache.set(key, result);
   }

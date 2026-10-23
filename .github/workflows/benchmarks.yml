@@ -1,0 +1,55 @@
+name: Nightly benchmarks
+
+# Parses the top-10 logs for every spec with a SimC APL, on every Heroic and Mythic boss of the
+# current raid, and publishes them to Cloudflare KV for Live Compare. See scripts/benchmarks/README.md.
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+    inputs:
+      args:
+        description: 'Extra job arguments, e.g. --spec Druid:Feral --difficulty 5'
+        required: false
+        default: ''
+
+concurrency:
+  group: benchmarks
+  cancel-in-progress: false
+
+jobs:
+  benchmarks:
+    name: 'Build benchmarks'
+    runs-on: ubuntu-24.04
+    # GitHub's limit is 360; the job itself stops parsing at --max-minutes (330 by default).
+    timeout-minutes: 355
+    if: github.repository == 'DarcyWritesCode/WoWCompare'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.x'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run benchmarks:typecheck
+      - run: pnpm run benchmarks:build
+        env:
+          DISABLE_CHECKER_PLUGIN: true
+      # Logs parsed on earlier runs, so each night only parses newcomers to the top 10.
+      - uses: actions/cache/restore@v4
+        with:
+          path: node_modules/.cache/wc-benchmarks-cache
+          key: wc-benchmarks-${{ github.run_id }}
+          restore-keys: wc-benchmarks-
+      - run: pnpm run benchmarks:run $ARGS
+        env:
+          ARGS: ${{ inputs.args }}
+          WCL_CLIENT_ID: ${{ secrets.WCL_CLIENT_ID }}
+          WCL_CLIENT_SECRET: ${{ secrets.WCL_CLIENT_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WC_KV_NAMESPACE_ID: ${{ secrets.WC_KV_NAMESPACE_ID }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: node_modules/.cache/wc-benchmarks-cache
+          key: wc-benchmarks-${{ github.run_id }}

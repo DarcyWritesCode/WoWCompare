@@ -1,0 +1,103 @@
+import { LogSnapshot } from '../metrics/results';
+import { Profile } from '../profile/types';
+import type { RankedParse } from './rankings';
+
+/**
+ * Data the nightly benchmark job (scripts/benchmarks/) publishes, read-only to the app: each
+ * spec's profile, and per spec, boss and difficulty the rankings plus the parsed top-10 logs.
+ * Served by a Cloudflare Pages Function (functions/wc-api/) from KV, and in development by the
+ * dev server (vite/publishedDataPlugin.ts) from the job's `--local` output.
+ */
+
+/**
+ * Bump whenever `LogSnapshot` or the metrics behind it change, so snapshots from older code are
+ * never used.
+ */
+export const SNAPSHOT_VERSION = 5;
+
+export interface PublishedProfile {
+  snapshotVersion: number;
+  profile: Profile;
+  /** SimC tokens the builder couldn't map to spells. */
+  unresolved: string[];
+  builtAt: number;
+}
+
+export interface BenchmarkBundle {
+  snapshotVersion: number;
+  specId: number;
+  encounterId: number;
+  difficulty: number;
+  builtAt: number;
+  /** `profileFingerprint` of the profile the snapshots were parsed with. */
+  profileFingerprint: string;
+  /** The ranked parses, best first (up to 300 in v2 mode). */
+  rankings: RankedParse[];
+  /** Parsed top-10 logs, by `logKey`. */
+  snapshots: Record<string, LogSnapshot>;
+}
+
+/** Storage keys, shared by the job, the Pages Function and the dev server. */
+export const profileKey = (specId: number) => `profile-${specId}`;
+export const bundleKey = (specId: number, encounterId: number, difficulty: number) =>
+  `bench-${specId}-${encounterId}-${difficulty}`;
+
+export const logKey = (ref: { reportCode: string; fightId: number; playerName: string }) =>
+  `${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
+
+/** FNV-1a, hex. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+/**
+ * Identifies what a profile measures (its entries and rules), so snapshots are only reused with
+ * the profile they were parsed with. Customized profiles get a different fingerprint.
+ */
+export const profileFingerprint = (profile: Profile) =>
+  fnv1a(JSON.stringify({ e: profile.entries, r: profile.rules }));
+
+const ENDPOINT = '/wc-api';
+/** Published data is a shortcut; don't hold up the analysis waiting for it. */
+const FETCH_TIMEOUT_MS = 5_000;
+
+async function getJson<T>(path: string): Promise<T | null> {
+  if (import.meta.env.MODE === 'test') {
+    return null;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${ENDPOINT}/${path}`, { signal: controller.signal });
+    return response.ok ? ((await response.json()) as T) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The spec's nightly profile, or null if none is published for this code version. */
+export async function fetchPublishedProfile(specId: number): Promise<PublishedProfile | null> {
+  const published = await getJson<PublishedProfile>(`profiles/${specId}`);
+  return published?.snapshotVersion === SNAPSHOT_VERSION && published.profile.specId === specId
+    ? published
+    : null;
+}
+
+/** The nightly rankings and top-10 snapshots for a boss, or null if none are published. */
+export async function fetchBenchmarkBundle(
+  specId: number,
+  encounterId: number,
+  difficulty: number,
+): Promise<BenchmarkBundle | null> {
+  const bundle = await getJson<BenchmarkBundle>(
+    `benchmarks/${specId}/${encounterId}/${difficulty}`,
+  );
+  return bundle?.snapshotVersion === SNAPSHOT_VERSION ? bundle : null;
+}

@@ -11,7 +11,7 @@ import { defineConfig } from 'vite';
 import svgr from 'vite-plugin-svgr';
 import checker from 'vite-plugin-checker';
 
-import snapshotCachePlugin from './vite/snapshotCachePlugin';
+import publishedDataPlugin from './vite/publishedDataPlugin';
 
 const GOOGLE_ANALYTICS_SCRIPT = `
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-MW95W6NHVC"></script>
@@ -72,7 +72,7 @@ export default defineConfig((env) => ({
     },
   },
   plugins: [
-    snapshotCachePlugin(),
+    publishedDataPlugin(),
     react(),
     lingui(),
     babel({

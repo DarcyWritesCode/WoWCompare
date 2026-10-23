@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import './workerShim';
 import configs from 'parser';
+import { setAccessToken } from 'common/wclV2/auth';
 
 import { Profile } from '../profile/types';
 import { setProfile } from '../profile/registry';
@@ -12,6 +13,8 @@ export interface ParseRequest {
   /** The analyzed log's profile, so benchmarks are scored the same way. */
   profile: Profile;
   ref: LogRef;
+  /** The page's WCL v2 token: workers can't read the page's localStorage. */
+  wclToken: string | null;
 }
 
 export type ParseResponse =
@@ -25,6 +28,7 @@ self.onmessage = async ({ data }: MessageEvent<ParseRequest>) => {
     if (!config) {
       throw new Error(`No parser registered for spec ${data.specId}`);
     }
+    setAccessToken(data.wclToken);
     setProfile(data.specId, data.profile);
     const snapshot = await parseLogSnapshot(config, data.ref);
     self.postMessage({ id: data.id, snapshot } satisfies ParseResponse);

@@ -1,3 +1,4 @@
+import { fetchPublishedProfile } from '../benchmarks/published';
 import { buildProfile, BuiltProfile } from '../simc/buildProfile';
 import { fetchLiveApl } from '../simc/source';
 import { getAdapter } from '../simc/specs';
@@ -15,8 +16,12 @@ const built = new Map<number, BuiltProfile>();
 const overrides = new Map<number, Profile>();
 const loads = new Map<number, Promise<void>>();
 
+/**
+ * SimC's default branch (`HEAD`), which tracks the current expansion. Old expansion branches stay
+ * up, so naming one here would keep serving a stale APL after the next expansion.
+ */
 export const aplUrl = (adapter: SpecAdapter) =>
-  `https://raw.githubusercontent.com/simulationcraft/simc/midnight/ActionPriorityLists/default/${adapter.simcFile}.simc`;
+  `https://raw.githubusercontent.com/simulationcraft/simc/HEAD/ActionPriorityLists/default/${adapter.simcFile}.simc`;
 
 /** Whether SimC publishes a default APL for this spec (most healers have none). */
 export function hasSimcApl(specId: number): boolean {
@@ -56,6 +61,17 @@ function build(adapter: SpecAdapter, text: string, source: Parameters<typeof bui
 }
 
 async function load(adapter: SpecAdapter) {
+  // The nightly job's profile first: the published benchmark snapshots were parsed with it, so
+  // they can be reused as-is (unless the viewer customized the profile).
+  const published = await fetchPublishedProfile(adapter.specId);
+  if (published) {
+    built.set(adapter.specId, {
+      profile: applyCustomization(published.profile, readCustomization(adapter.specId)),
+      unresolved: published.unresolved,
+    });
+    return;
+  }
+
   const url = aplUrl(adapter);
   const source = { kind: 'simc' as const, file: adapter.simcFile, url };
   const live = await fetchLiveApl(url);
@@ -73,12 +89,13 @@ async function load(adapter: SpecAdapter) {
 }
 
 /**
- * Builds the spec's profile from its current SimC APL (falling back to the bundled snapshot).
- * Never rejects; runs once per session per spec.
+ * Loads the spec's profile: the nightly published one, else built from SimC's current APL, else
+ * from the bundled snapshot. Never rejects; runs once per session per spec. Skipped when a profile
+ * was selected with `setProfile` (parse workers, the nightly job), which takes precedence anyway.
  */
 export function loadProfile(specId: number): Promise<void> {
   const adapter = getAdapter(specId);
-  if (!adapter || !hasSimcApl(specId)) {
+  if (!adapter || !hasSimcApl(specId) || overrides.has(specId)) {
     return Promise.resolve();
   }
   let pending = loads.get(specId);
