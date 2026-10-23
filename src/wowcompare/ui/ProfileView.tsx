@@ -8,6 +8,7 @@ import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
 import { classSpellMatcher } from '../simc/specs';
 import AplExpectations from './AplExpectations';
+import BenchmarkLogList from './BenchmarkLogList';
 import BenchmarkTable from './BenchmarkTable';
 import BiggestMistakes from './BiggestMistakes';
 import { CHART_COLORS, DpsStrip, StatTile } from './charts';
@@ -435,6 +436,13 @@ export default function ProfileView({
         explanation="DPS per second around each window (highlighted); the dashed line is the fight average. Scroll sideways through the windows."
       >
         <WindowReels player={snapshot} benchmarks={logs} />
+      </Panel>
+
+      <Panel
+        title="Logs compared against"
+        explanation="Every parsed benchmark log: #1, same build and best close first, then by rank. Open one on Warcraft Logs or analyze it here."
+      >
+        <BenchmarkLogList logs={logs} />
       </Panel>
     </>
   );

@@ -42,6 +42,9 @@ export interface BenchmarkColumn {
 /** One parsed benchmark log, selectable in the window timelines. */
 export interface BenchmarkLog {
   key: string;
+  reportCode: string;
+  fightId: number;
+  playerName: string;
   /** Which benchmarks this log is, e.g. "#1, Same build". */
   roles: string[];
   description: string;
@@ -294,6 +297,9 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined) {
       .sort(([a], [b]) => (headline.includes(a) ? 0 : a.rank) - (headline.includes(b) ? 0 : b.rank))
       .map(([parse, snapshot]) => ({
         key: `${parse.reportCode}:${parse.fightId}:${parse.name}`,
+        reportCode: parse.reportCode,
+        fightId: parse.fightId,
+        playerName: parse.name,
         roles: rolesOf(parse),
         description: describeParse(parse),
         snapshot,
