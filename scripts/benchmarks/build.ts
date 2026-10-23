@@ -167,6 +167,12 @@ class RateBudget {
 }
 
 /**
+ * WCL zones that pass the checks below but aren't a raid to benchmark: test realms, and
+ * "Complete Raid" pseudo-zones (full-clear rankings with their own encounter IDs).
+ */
+const NOT_A_RAID = /\((PTR|Beta)\)|Complete Raid/i;
+
+/**
  * The bosses of the current raid(s): unfrozen zones of the newest expansion that has any, with
  * both Heroic and Mythic. Comes from WCL so a new tier or expansion needs no code change.
  */
@@ -193,6 +199,7 @@ async function currentRaidEncounters(): Promise<number[]> {
     const raids = expansion.zones.filter(
       (zone) =>
         !zone.frozen &&
+        !NOT_A_RAID.test(zone.name) &&
         DIFFICULTIES.every((id) => zone.difficulties?.some((d) => d.id === id)) &&
         (zone.encounters?.length ?? 0) > 0,
     );

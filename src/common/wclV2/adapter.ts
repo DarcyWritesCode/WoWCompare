@@ -25,6 +25,14 @@ interface V2Actor {
   icon: string;
 }
 
+interface V2Ability {
+  gameID: number;
+  name: string;
+  icon: string;
+  /** Spell school, as a string. */
+  type: string;
+}
+
 interface V2FightNpc {
   id: number;
   gameID?: number;
@@ -76,7 +84,13 @@ interface V2Report {
   rankedCharacters:
     | { id: number; name: string; server: { name: string; region: { compactName: string } } }[]
     | null;
-  masterData: { lang: string; logVersion: number; gameVersion: number; actors: V2Actor[] };
+  masterData: {
+    lang: string;
+    logVersion: number;
+    gameVersion: number;
+    actors: V2Actor[];
+    abilities: V2Ability[];
+  };
   phases:
     | {
         encounterID: number;
@@ -99,6 +113,7 @@ query ($code: String!, $translate: Boolean) {
       masterData(translate: $translate) {
         lang logVersion gameVersion
         actors { id name type subType server petOwner gameID icon }
+        abilities { gameID name icon type }
       }
       phases { encounterID separatesWipes phases { id name isIntermission } }
       fights(translate: $translate) {
@@ -150,10 +165,43 @@ query ($code: String!, $start: Float, $end: Float, $filter: String, $translate: 
 
 /** Actor lists from the last fights fetch, used to expand `actorid` to include pets. */
 const actorCache = new Map<string, V2Actor[]>();
+/** v1 ability objects from the last fights fetch, by game ID: v2 events only carry the ID. */
+const abilityCache = new Map<string, Map<number, V1Ability>>();
+
+interface V1Ability {
+  name: string;
+  guid: number;
+  type: number;
+  abilityIcon: string;
+}
+
+/** v2 events name abilities by `abilityGameID`; v1 events, which the parser reads, embed them. */
+function toV1Event(code: string, event: Record<string, unknown>) {
+  const abilities = abilityCache.get(code);
+  const ability = (id: unknown): V1Ability | undefined =>
+    typeof id === 'number'
+      ? (abilities?.get(id) ?? { name: `Unknown ${id}`, guid: id, type: 0, abilityIcon: '' })
+      : undefined;
+  const { abilityGameID, extraAbilityGameID, ...rest } = event;
+  return {
+    ...rest,
+    ...(abilityGameID !== undefined && { ability: ability(abilityGameID) }),
+    ...(extraAbilityGameID !== undefined && { extraAbility: ability(extraAbilityGameID) }),
+  };
+}
 
 function toV1Report(code: string, report: V2Report): WCLReport {
   const actors = report.masterData.actors;
   actorCache.set(code, actors);
+  abilityCache.set(
+    code,
+    new Map(
+      report.masterData.abilities.map((a) => [
+        a.gameID,
+        { name: a.name, guid: a.gameID, type: Number(a.type), abilityIcon: a.icon },
+      ]),
+    ),
+  );
 
   const fightsFor = <T>(pick: (fight: V2Fight) => T | undefined) =>
     report.fights.flatMap((fight) => {
@@ -294,19 +342,28 @@ function hostility(value: QueryParams[string]) {
 }
 
 /**
- * v1's `actorid` returned events where the actor (or its pets) was source or target; v2 only
- * filters by source, so express it as a filter instead.
+ * v1's `actorid` returned events where the actor (or its pets) was source or target. v2's
+ * `sourceID` argument covers only the source side, and its filter expressions match `source.id`
+ * against game IDs, not report actor IDs (so an ID filter returns nothing). Names do work: filter
+ * by the actor's and its pets' names, then keep only events whose IDs match exactly, since other
+ * players' pets can share a name.
  */
 function actorFilter(code: string, actorId: number, filter?: string) {
-  const ids = [actorId];
-  for (const actor of actorCache.get(code) ?? []) {
-    if (actor.petOwner === actorId) {
-      ids.push(actor.id);
-    }
+  const actors = (actorCache.get(code) ?? []).filter(
+    (actor) => actor.id === actorId || actor.petOwner === actorId,
+  );
+  if (actors.length === 0) {
+    throw new Error(`Actor ${actorId} unknown: fetch report ${code}'s fights before its events`);
   }
-  const list = ids.join(', ');
-  const involvement = `source.id in (${list}) or target.id in (${list})`;
-  return filter ? `(${filter}) and (${involvement})` : involvement;
+  const ids = new Set([actorId, ...actors.map((actor) => actor.id)]);
+  const names = [...new Set(actors.map((actor) => JSON.stringify(actor.name)))].join(', ');
+  const involvement = `source.name in (${names}) or target.name in (${names})`;
+  return {
+    filter: filter ? `(${filter}) and (${involvement})` : involvement,
+    keep: (event: { sourceID?: number; targetID?: number }) =>
+      (event.sourceID !== undefined && ids.has(event.sourceID)) ||
+      (event.targetID !== undefined && ids.has(event.targetID)),
+  };
 }
 
 function commonVariables(code: string, params: QueryParams) {
@@ -345,16 +402,29 @@ export async function fetchV1Endpoint(endpoint: string, params: QueryParams): Pr
     const code = parts.at(-1)!;
     const view = parts.length === 4 ? parts[2] : undefined;
     const { actorId, filter, ...vars } = commonVariables(code, params);
+    const byActor = !view && actorId !== undefined ? actorFilter(code, actorId, filter) : null;
     const data = await wclQuery<{
-      reportData: { report: { events: { data: unknown[]; nextPageTimestamp: number | null } } };
+      reportData: {
+        report: {
+          events: {
+            data: (Record<string, unknown> & { sourceID?: number; targetID?: number })[];
+            nextPageTimestamp: number | null;
+          };
+        };
+      };
     }>(EVENTS_QUERY, {
       ...vars,
       dataType: view ? pascal(view) : undefined,
       sourceID: view && actorId !== undefined ? actorId : undefined,
-      filter: !view && actorId !== undefined ? actorFilter(code, actorId, filter) : filter,
+      filter: byActor?.filter ?? filter,
     });
     const { data: events, nextPageTimestamp } = data.reportData.report.events;
-    return { events, nextPageTimestamp: nextPageTimestamp ?? undefined };
+    return {
+      events: (byActor ? events.filter(byActor.keep) : events).map((event) =>
+        toV1Event(code, event),
+      ),
+      nextPageTimestamp: nextPageTimestamp ?? undefined,
+    };
   }
 
   if (parts[0] === 'report' && (parts[1] === 'tables' || parts[1] === 'graph')) {
