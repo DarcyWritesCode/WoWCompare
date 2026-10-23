@@ -51,6 +51,13 @@ const CACHE_PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 /** Pause before spending the last 5% of the hourly WCL budget. */
 const RATE_LIMIT_HEADROOM = 0.05;
 const RATE_LIMIT_CHECK_MS = 30_000;
+/**
+ * Cloudflare resources the job sets up itself with the deploy token (KV and Pages edit): the KV
+ * namespace, and its binding on the Pages project that functions/wc-api/ reads.
+ */
+const KV_NAMESPACE_TITLE = 'wowcompare-benchmarks';
+const PAGES_PROJECT = 'wowcompare'; // as in .github/workflows/deploy-pages.yml
+const KV_BINDING = 'SNAPSHOTS';
 /** Same directory the dev server reads (vite/publishedDataPlugin.ts). */
 const LOCAL_DIR = path.resolve('node_modules/.cache/wowcompare-published');
 
@@ -233,6 +240,65 @@ class SnapshotCache {
   }
 }
 
+/** A Cloudflare account API call; returns the response's `result`. */
+async function cloudflare<T>(method: string, pathname: string, body?: unknown): Promise<T> {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${requireEnv('CLOUDFLARE_ACCOUNT_ID')}${pathname}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${requireEnv('CLOUDFLARE_API_TOKEN')}`,
+        'Content-Type': 'application/json',
+      },
+      body: body === undefined || typeof body === 'string' ? body : JSON.stringify(body),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Cloudflare ${method} ${pathname.split('?')[0]} failed: HTTP ${response.status} ${await response.text()}`,
+    );
+  }
+  return ((await response.json()) as { result: T }).result;
+}
+
+/**
+ * The KV namespace's ID, creating the namespace and binding it to the Pages project if needed.
+ * A new binding only takes effect on the next deploy, which the workflow then triggers.
+ */
+async function ensureKvNamespace(): Promise<string> {
+  const namespaces = await cloudflare<{ id: string; title: string }[]>(
+    'GET',
+    '/storage/kv/namespaces?per_page=100',
+  );
+  let id = namespaces.find((namespace) => namespace.title === KV_NAMESPACE_TITLE)?.id;
+  if (!id) {
+    id = (
+      await cloudflare<{ id: string }>('POST', '/storage/kv/namespaces', {
+        title: KV_NAMESPACE_TITLE,
+      })
+    ).id;
+    say(`Created KV namespace ${KV_NAMESPACE_TITLE}`);
+  }
+  const project = await cloudflare<{
+    deployment_configs: {
+      production: { kv_namespaces?: Record<string, { namespace_id: string }> | null };
+    };
+  }>('GET', `/pages/projects/${PAGES_PROJECT}`);
+  if (project.deployment_configs.production.kv_namespaces?.[KV_BINDING]?.namespace_id !== id) {
+    // PATCH merges into the existing production config.
+    await cloudflare('PATCH', `/pages/projects/${PAGES_PROJECT}`, {
+      deployment_configs: { production: { kv_namespaces: { [KV_BINDING]: { namespace_id: id } } } },
+    });
+    say(
+      `Bound it to Pages project ${PAGES_PROJECT} as ${KV_BINDING}; applies from the next deploy`,
+    );
+    if (process.env.GITHUB_OUTPUT) {
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, 'redeploy=true\n');
+    }
+  }
+  return id;
+}
+
 /**
  * Where published data goes: Cloudflare KV, or the dev server's directory with `--local`. KV
  * writes are skipped when nothing changed since a recent write, to stay inside KV's daily write
@@ -242,12 +308,19 @@ class Store {
   private readonly manifestFile = path.join(cacheDir, 'kv-manifest.json');
   private readonly manifest: Record<string, { hash: string; writtenAt: number }> = {};
 
-  constructor(private readonly local: boolean) {
+  private constructor(
+    private readonly local: boolean,
+    private readonly namespaceId: string | null,
+  ) {
     if (local) {
       fs.mkdirSync(LOCAL_DIR, { recursive: true });
     } else if (fs.existsSync(this.manifestFile)) {
       this.manifest = JSON.parse(fs.readFileSync(this.manifestFile, 'utf8'));
     }
+  }
+
+  static async open(local: boolean): Promise<Store> {
+    return new Store(local, local ? null : await ensureKvNamespace());
   }
 
   /** Writes `value` unless `identity` (its content minus timestamps) is unchanged and recent. */
@@ -262,24 +335,11 @@ class Store {
     if (previous?.hash === hash && Date.now() - previous.writtenAt < REWRITE_AFTER_MS) {
       return false;
     }
-    const account = requireEnv('CLOUDFLARE_ACCOUNT_ID');
-    const namespace = requireEnv('WC_KV_NAMESPACE_ID');
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${namespace}/values/${encodeURIComponent(key)}?expiration_ttl=${KV_TTL_SECONDS}`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${requireEnv('CLOUDFLARE_API_TOKEN')}`,
-          'Content-Type': 'application/json',
-        },
-        body,
-      },
+    await cloudflare(
+      'PUT',
+      `/storage/kv/namespaces/${this.namespaceId}/values/${encodeURIComponent(key)}?expiration_ttl=${KV_TTL_SECONDS}`,
+      body,
     );
-    if (!response.ok) {
-      throw new Error(
-        `KV write of ${key} failed: HTTP ${response.status} ${await response.text()}`,
-      );
-    }
     this.manifest[key] = { hash, writtenAt: Date.now() };
     return true;
   }
@@ -428,7 +488,7 @@ async function main() {
   } else if (args.encounter.length === 0) {
     throw new Error('v1 mode (no WCL credentials) needs --encounter');
   }
-  const store = new Store(args.local);
+  const store = await Store.open(args.local);
   const cache = new SnapshotCache();
   const budget = new RateBudget();
 

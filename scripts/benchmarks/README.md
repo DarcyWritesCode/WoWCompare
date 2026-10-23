@@ -33,12 +33,12 @@ The app reads both through `functions/wc-api/` (`/wc-api/profiles/:spec`,
 1. **Warcraft Logs API client.** Create a client at https://www.warcraftlogs.com/api/clients (any
    redirect URL; the client-credentials flow doesn't use it). Add repository secrets
    `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET`.
-2. **KV namespace.** `pnpm dlx wrangler kv namespace create wowcompare-benchmarks`, then in the
-   Cloudflare dashboard bind it to the `wowcompare` Pages project as `SNAPSHOTS` (Settings →
-   Bindings, Production). Add its ID as the secret `WC_KV_NAMESPACE_ID`.
+2. **KV namespace.** Nothing to do. On its first run the job creates the `wowcompare-benchmarks`
+   namespace, binds it to the `wowcompare` Pages project as `SNAPSHOTS`, and starts a deploy so
+   the binding takes effect.
 3. **API token.** The job reuses the deploy token, `CLOUDFLARE_API_TOKEN`. It needs
    _Account → Workers KV Storage → Edit_ on top of _Cloudflare Pages → Edit_. Tokens made from the
-   "Edit Cloudflare Workers" template already have both. Without it, KV writes fail with HTTP 403.
+   "Edit Cloudflare Workers" template already have both. Without them the job fails with HTTP 403.
    `CLOUDFLARE_ACCOUNT_ID` is already set for deploys.
 4. Run it once by hand: Actions → _Nightly benchmarks_ → _Run workflow_. To try it narrowly first,
    pass e.g. `--spec Druid:Feral --difficulty 5`.
