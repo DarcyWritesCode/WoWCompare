@@ -142,7 +142,7 @@ function Summary({
   player: LogSnapshot;
   results: ProfileResults;
   reference: BenchmarkReference;
-  mistakes: Mistake[];
+  mistakes: Mistake[] | null;
   normalization: Normalization;
 }) {
   const hp = normalization.bossHp;
@@ -160,7 +160,7 @@ function Summary({
   ].filter(Boolean);
   const scaledNote = adjusted.length > 0 ? `scaled to your ${adjusted.join(' and ')}` : null;
   const counts = statusCounts(results);
-  const worst = mistakes[0];
+  const worst = mistakes?.[0];
 
   return (
     <>
@@ -208,7 +208,9 @@ function Summary({
               "Some of the gap is gear, raid comp and kill time, which play can't close; the checkboxes above take those out."}{' '}
           </>
         )}
-        {mistakes.length > 0 ? (
+        {!mistakes ? (
+          <>DPS estimates for each mistake appear once the top 10 logs have loaded.</>
+        ) : mistakes.length > 0 ? (
           <>
             The gaps that play can close start with{' '}
             {names(mistakes.slice(0, 3).map((m) => <strong key={m.key}>{m.title}</strong>))}; the
@@ -253,8 +255,18 @@ export default function ProfileView({
     () => benchmarkInputs && { ...benchmarkInputs, playerResults: snapshot.results },
     [benchmarkInputs, snapshot],
   );
-  const { status, busy, load, available, rankingCount, columns, logs, reference, playerResults } =
-    useBenchmarks(inputs);
+  const {
+    status,
+    busy,
+    load,
+    loaded,
+    available,
+    rankingCount,
+    columns,
+    logs,
+    reference,
+    playerResults,
+  } = useBenchmarks(inputs);
   const results = playerResults ?? snapshot.results;
   useOpenDetailsForPrint();
   const [normalization, setNormalizationState] = useState(readNormalization);
@@ -267,12 +279,15 @@ export default function ProfileView({
     }
   };
   const source = profile.source;
+  // Estimates against the #1 parse alone swing wildly (one log's windows), so they wait for the
+  // top 10, unless it can't load at all.
+  const mistakesReady = loaded.includes('top10') || (!busy && reference !== null);
   const mistakes = useMemo(
     () =>
-      reference
+      reference && mistakesReady
         ? biggestMistakes(profile, snapshot, reference.logs, classSpellMatcher(profile.specId))
-        : [],
-    [profile, snapshot, reference],
+        : null,
+    [profile, snapshot, reference, mistakesReady],
   );
 
   const moreButtons = available.length > 0 && (
@@ -340,11 +355,15 @@ export default function ProfileView({
           title="Biggest mistakes"
           explanation={`What play would close against ${reference.label}, largest first.`}
         >
-          <BiggestMistakes
-            mistakes={mistakes}
-            fightDps={snapshot.fightDps}
-            referenceLabel={reference.label}
-          />
+          {mistakes ? (
+            <BiggestMistakes
+              mistakes={mistakes}
+              fightDps={snapshot.fightDps}
+              referenceLabel={reference.label}
+            />
+          ) : (
+            <p className="text-muted">Estimates appear once the top 10 logs have loaded.</p>
+          )}
         </Panel>
       )}
 
