@@ -219,6 +219,14 @@ export interface ResourceValue {
   damagePerPoint: number;
 }
 
+/** A damage buff someone else put on the player, e.g. Power Infusion. */
+export interface ExternalBuff {
+  spellId: number;
+  name: string;
+  /** Fraction of the fight it was up. */
+  uptime: number;
+}
+
 /** Everything a parsed log contributes to the comparison. */
 export interface LogSnapshot {
   /** By resource name. */
@@ -231,6 +239,8 @@ export interface LogSnapshot {
   results: ProfileResults;
   build: BuildInfo;
   comp: RaidComp;
+  /** Buffs from `EXTERNAL_BUFF_IDS` that other players cast on this one. */
+  externalBuffs: ExternalBuff[];
   windows: CooldownWindowSet[];
   fightDps: number;
   /** Average equipped item level. */

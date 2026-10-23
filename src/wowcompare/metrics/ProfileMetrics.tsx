@@ -13,7 +13,15 @@ import Enemies from 'parser/shared/modules/Enemies';
 
 import { simcToken } from '../simc/resolve';
 import { mergeIntervals, totalDuration, windowThroughput } from './intervals';
-import { AbilityTotal, AuraUsage, LogSnapshot, ProfileResults, scoreProfile } from './results';
+import { EXTERNAL_BUFF_IDS } from '../benchmarks/reference';
+import {
+  AbilityTotal,
+  AuraUsage,
+  ExternalBuff,
+  LogSnapshot,
+  ProfileResults,
+  scoreProfile,
+} from './results';
 
 /** Combines the metric modules into one scored, serializable result for the selected profile. */
 class ProfileMetrics extends Analyzer {
@@ -167,6 +175,32 @@ class ProfileMetrics extends Analyzer {
     });
   }
 
+  /** Uptime of the `EXTERNAL_BUFF_IDS` buffs other players put on this one. */
+  private externalBuffs(): ExternalBuff[] {
+    const start = this.owner.fight.start_time;
+    const end = this.owner.fight.end_time;
+    const bySpell = new Map<
+      number,
+      { name: string; intervals: { start: number; end: number }[] }
+    >();
+    for (const aura of this.selectedCombatant.buffs) {
+      if (aura.sourceID === this.owner.playerId || !EXTERNAL_BUFF_IDS.includes(aura.ability.guid)) {
+        continue;
+      }
+      const group = bySpell.get(aura.ability.guid) ?? { name: aura.ability.name, intervals: [] };
+      group.intervals.push({ start: aura.start, end: aura.end ?? end });
+      bySpell.set(aura.ability.guid, group);
+    }
+    return [...bySpell.entries()].map(([spellId, group]) => ({
+      spellId,
+      name: group.name,
+      uptime:
+        end > start
+          ? totalDuration(mergeIntervals(group.intervals, start, end)) / (end - start)
+          : 0,
+    }));
+  }
+
   /** Results plus window timelines: everything this log contributes to a comparison. */
   snapshot(): LogSnapshot | null {
     const results = this.results();
@@ -189,6 +223,7 @@ class ProfileMetrics extends Analyzer {
       auras: this.auraUsage(),
       build: { talents, heroTree },
       comp,
+      externalBuffs: this.externalBuffs(),
       windows: this.cooldownMetrics.active ? this.cooldownMetrics.windowTimelines() : [],
       fightDps: durationMs > 0 ? (damage / durationMs) * 1000 : 0,
       ilvl: this.selectedCombatant.ilvl,

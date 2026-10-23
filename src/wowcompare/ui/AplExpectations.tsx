@@ -43,8 +43,8 @@ function verdict(row: Row) {
 const pct = (value: number | null) => (value === null ? '—' : `${formatPercentage(value, 0)}%`);
 
 /**
- * Each expectation the SimC APL encodes, measured on the player and on the top-10 parses, to show
- * where real top play agrees with the APL and where it doesn't.
+ * Each expectation the SimC APL encodes, measured on the player and on the reference parses, to show
+ * where real play at that level agrees with the APL and where it doesn't.
  */
 export default function AplExpectations({
   player,

@@ -85,7 +85,7 @@ const thresholdsFrom = (reference: number | null | undefined) =>
     : undefined;
 
 /**
- * Re-scores results against a reference (the top-10 median) instead of profile thresholds,
+ * Re-scores results against a reference (the reference median) instead of profile thresholds,
  * which SimC APLs don't provide.
  */
 export function rescoreAgainst(results: ProfileResults, reference: ProfileResults): ProfileResults {

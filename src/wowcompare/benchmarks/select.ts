@@ -1,4 +1,5 @@
-import { RankedParse } from './rankings';
+import { RankedParse, RankingsPool } from './rankings';
+import { REFERENCE_SIZE, ReferenceBand, selectReference } from './reference';
 
 /** The analyzed log's context, matched against ranked parses. */
 export interface PlayerContext {
@@ -33,11 +34,14 @@ export interface CloseMatch {
 }
 
 export interface BenchmarkSelection {
+  /** The #1 parse, shown as the ceiling; nothing is scored against it once the reference loads. */
   top: RankedParse | undefined;
-  top10: RankedParse[];
+  /** The parses around `REFERENCE_PERCENTILE` the player is scored against. */
+  reference: ReferenceBand;
   sameBuild: BuildMatch | undefined;
   bestClose: CloseMatch | undefined;
-  top10Close: CloseMatch[];
+  /** Up to `REFERENCE_SIZE` parses closest to the player's ilvl, kill time and raid size. */
+  close: CloseMatch[];
 }
 
 /** Jaccard similarity of two talent sets (1 = identical build). */
@@ -65,37 +69,40 @@ function closeness(parse: RankedParse, player: PlayerContext, bounds: CloseBound
   );
 }
 
-/** Picks the five benchmarks from ranked parses (ordered best first). */
+/**
+ * Picks the five benchmarks. Same build and close parses come from the pool around the reference
+ * rank, so they're held to the same realistic level.
+ */
 export function selectBenchmarks(
-  rankings: RankedParse[],
+  { top, pool, totalParses }: RankingsPool,
   player: PlayerContext,
   bounds: CloseBounds = DEFAULT_CLOSE_BOUNDS,
 ): BenchmarkSelection {
   let sameBuild: BuildMatch | undefined;
-  for (const parse of rankings) {
+  for (const parse of pool) {
     const similarity = talentSimilarity(player.talents, parse.talents);
     if (!sameBuild || similarity > sameBuild.similarity) {
       sameBuild = { parse, similarity };
     }
     if (similarity >= SAME_BUILD_THRESHOLD) {
-      break; // rankings are best first, so the first close-enough build is the best one
+      break; // the pool is best first, so the first close-enough build is the best one
     }
   }
 
-  const inBounds = rankings.filter((parse) => withinBounds(parse, player, bounds));
-  const fill = rankings
+  const inBounds = pool.filter((parse) => withinBounds(parse, player, bounds));
+  const fill = pool
     .filter((parse) => !inBounds.includes(parse))
     .sort((a, b) => closeness(a, player, bounds) - closeness(b, player, bounds));
-  const top10Close: CloseMatch[] = [
+  const close: CloseMatch[] = [
     ...inBounds.map((parse) => ({ parse, withinBounds: true })),
     ...fill.map((parse) => ({ parse, withinBounds: false })),
-  ].slice(0, 10);
+  ].slice(0, REFERENCE_SIZE);
 
   return {
-    top: rankings[0],
-    top10: rankings.slice(0, 10),
+    top,
+    reference: selectReference(pool, totalParses),
     sameBuild,
-    bestClose: top10Close[0],
-    top10Close,
+    bestClose: close[0],
+    close,
   };
 }

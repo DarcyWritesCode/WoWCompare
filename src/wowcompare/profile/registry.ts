@@ -61,7 +61,7 @@ function build(adapter: SpecAdapter, text: string, source: Parameters<typeof bui
 }
 
 async function load(adapter: SpecAdapter) {
-  // The nightly job's profile first: the published benchmark snapshots were parsed with it, so
+  // The benchmark job's profile first: the published benchmark snapshots were parsed with it, so
   // they can be reused as-is (unless the viewer customized the profile).
   const published = await fetchPublishedProfile(adapter.specId);
   if (published) {
@@ -89,9 +89,9 @@ async function load(adapter: SpecAdapter) {
 }
 
 /**
- * Loads the spec's profile: the nightly published one, else built from SimC's current APL, else
+ * Loads the spec's profile: the published one (rebuilt weekly), else built from SimC's current APL, else
  * from the bundled snapshot. Never rejects; runs once per session per spec. Skipped when a profile
- * was selected with `setProfile` (parse workers, the nightly job), which takes precedence anyway.
+ * was selected with `setProfile` (parse workers, the benchmark job), which takes precedence anyway.
  */
 export function loadProfile(specId: number): Promise<void> {
   const adapter = getAdapter(specId);

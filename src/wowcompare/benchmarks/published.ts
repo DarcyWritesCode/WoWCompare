@@ -1,10 +1,12 @@
 import { LogSnapshot } from '../metrics/results';
 import { Profile } from '../profile/types';
 import type { RankedParse } from './rankings';
+import type { ReferenceBand } from './reference';
 
 /**
- * Data the nightly benchmark job (scripts/benchmarks/) publishes, read-only to the app: each
- * spec's profile, and per spec, boss and difficulty the rankings plus the parsed top-10 logs.
+ * Data the benchmark job (scripts/benchmarks/) publishes, read-only to the app: each spec's
+ * profile; per spec, boss and difficulty the rankings plus the parsed #1 and reference logs; and a
+ * status summary for the specs page. Each class is rebuilt weekly (see schedule.ts).
  * Served by a Cloudflare Pages Function (functions/wc-api/) from KV, and in development by the
  * dev server (vite/publishedDataPlugin.ts) from the job's `--local` output.
  */
@@ -13,7 +15,7 @@ import type { RankedParse } from './rankings';
  * Bump whenever `LogSnapshot` or the metrics behind it change, so snapshots from older code are
  * never used.
  */
-export const SNAPSHOT_VERSION = 5;
+export const SNAPSHOT_VERSION = 6;
 
 export interface PublishedProfile {
   snapshotVersion: number;
@@ -21,6 +23,14 @@ export interface PublishedProfile {
   /** SimC tokens the builder couldn't map to spells. */
   unresolved: string[];
   builtAt: number;
+  /** The SimC commit that last changed the APL file; null if GitHub couldn't be asked. */
+  aplCommit: AplCommit | null;
+}
+
+export interface AplCommit {
+  sha: string;
+  /** ISO date. */
+  date: string;
 }
 
 export interface BenchmarkBundle {
@@ -31,16 +41,54 @@ export interface BenchmarkBundle {
   builtAt: number;
   /** `profileFingerprint` of the profile the snapshots were parsed with. */
   profileFingerprint: string;
-  /** The ranked parses, best first (up to 300 in v2 mode). */
-  rankings: RankedParse[];
-  /** Parsed top-10 logs, by `logKey`. */
+  top: RankedParse | undefined;
+  /** Ranked parses around the reference rank, best first. */
+  pool: RankedParse[];
+  totalParses: number | null;
+  /** The reference candidates the job parsed. */
+  reference: ReferenceBand;
+  /** Parsed logs (the #1 and the reference candidates), by `logKey`. */
   snapshots: Record<string, LogSnapshot>;
+}
+
+/** One spec, boss and difficulty in the status summary. */
+export interface BundleStatus {
+  encounterId: number;
+  encounterName: string | null;
+  difficulty: number;
+  builtAt: number;
+  totalParses: number | null;
+  /** Rank range of the reference candidates. */
+  ranks: [number, number] | null;
+  /** Reference candidates parsed, of which externally buffed, and those that failed. */
+  logs: number;
+  buffed: number;
+  failed: number;
+}
+
+export interface SpecStatus {
+  specId: number;
+  profileBuiltAt: number;
+  aplCommit: AplCommit | null;
+  /** When the job last got through every boss for this spec; null while incomplete. */
+  completedAt: number | null;
+  bundles: BundleStatus[];
+}
+
+/** What the job last did for each spec, for the specs page. */
+export interface BenchmarkStatus {
+  snapshotVersion: number;
+  updatedAt: number;
+  /** By spec ID. */
+  specs: Record<string, SpecStatus>;
 }
 
 /** Storage keys, shared by the job, the Pages Function and the dev server. */
 export const profileKey = (specId: number) => `profile-${specId}`;
 export const bundleKey = (specId: number, encounterId: number, difficulty: number) =>
   `bench-${specId}-${encounterId}-${difficulty}`;
+
+export const STATUS_KEY = 'status';
 
 export const logKey = (ref: { reportCode: string; fightId: number; playerName: string }) =>
   `${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
@@ -82,7 +130,7 @@ async function getJson<T>(path: string): Promise<T | null> {
   }
 }
 
-/** The spec's nightly profile, or null if none is published for this code version. */
+/** The spec's published profile, or null if none is published for this code version. */
 export async function fetchPublishedProfile(specId: number): Promise<PublishedProfile | null> {
   const published = await getJson<PublishedProfile>(`profiles/${specId}`);
   return published?.snapshotVersion === SNAPSHOT_VERSION && published.profile.specId === specId
@@ -90,7 +138,7 @@ export async function fetchPublishedProfile(specId: number): Promise<PublishedPr
     : null;
 }
 
-/** The nightly rankings and top-10 snapshots for a boss, or null if none are published. */
+/** The rankings and parsed reference logs for a boss, or null if none are published. */
 export async function fetchBenchmarkBundle(
   specId: number,
   encounterId: number,
@@ -100,4 +148,10 @@ export async function fetchBenchmarkBundle(
     `benchmarks/${specId}/${encounterId}/${difficulty}`,
   );
   return bundle?.snapshotVersion === SNAPSHOT_VERSION ? bundle : null;
+}
+
+/** The job's status summary, or null if none is published. */
+export async function fetchBenchmarkStatus(): Promise<BenchmarkStatus | null> {
+  const status = await getJson<BenchmarkStatus>(STATUS_KEY);
+  return status?.snapshotVersion === SNAPSHOT_VERSION ? status : null;
 }

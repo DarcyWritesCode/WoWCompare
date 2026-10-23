@@ -7,7 +7,7 @@ import { LogSnapshot } from '../metrics/results';
 import { STATUS_COLORS } from './ProfileResultsTable';
 import { CHART_COLORS, fill, tint } from './charts';
 import { damageFactor, headline, hpShare, Normalization } from './normalize';
-import { BenchmarkColumn } from './useBenchmarks';
+import { BENCHMARK_LABELS, BenchmarkColumn } from './useBenchmarks';
 
 /** Abilities drawn in each cooldown's chart; the table below lists them all. */
 const CHART_ROWS = 8;
@@ -128,10 +128,12 @@ function describe(
 }
 
 /** Columns shown, by benchmark title; the rest would make the table too wide. */
-const COLUMN_TITLES = ['#1', 'Top 10 median', 'Same build', 'Best close'];
-/** An ability is listed if the player uses it or at least this share of top-10 logs do. */
+const COLUMN_TITLES = (['top', 'reference', 'sameBuild', 'bestClose'] as const).map(
+  (kind) => BENCHMARK_LABELS[kind],
+);
+/** An ability is listed if the player uses it or at least this share of reference logs do. */
 const COMMON_IN_TOP = 0.5;
-/** You vs the top-10 median: below this fraction is flagged. */
+/** You vs the reference median: below this fraction is flagged. */
 const BEHIND = 0.9;
 
 interface Stat {
@@ -200,7 +202,7 @@ function StatCell({
 
 /**
  * For each cooldown, the big damage abilities inside its windows: casts per window and average
- * damage per cast, for the player and the benchmarks. Lower values than the top-10 median show in
+ * damage per cast, for the player and the benchmarks. Lower values than the reference median show in
  * orange in the player's column.
  */
 export default function CooldownDamage({
@@ -213,7 +215,7 @@ export default function CooldownDamage({
   player: LogSnapshot;
   columns: BenchmarkColumn[];
   normalization: Normalization;
-  /** The reference logs (top 10, else #1) the player is flagged against. */
+  /** The reference logs (else #1) the player is flagged against. */
   topLogs: LogSnapshot[];
   referenceLabel: string;
 }) {

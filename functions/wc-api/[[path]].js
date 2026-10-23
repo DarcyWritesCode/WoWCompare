@@ -1,13 +1,14 @@
-// Cloudflare Pages Function: serves what the nightly benchmark job (scripts/benchmarks/) publishes
+// Cloudflare Pages Function: serves what the benchmark job (scripts/benchmarks/) publishes
 // to the KV namespace bound as SNAPSHOTS. Read-only: only the job writes, with an API token, so
 // viewers can't plant data (see src/wowcompare/benchmarks/published.ts). Without the binding
 // every request is a miss and the app parses benchmark logs itself.
 const ROUTES = [
   { pattern: /^profiles\/(\d+)$/, key: (m) => `profile-${m[1]}` },
   { pattern: /^benchmarks\/(\d+)\/(\d+)\/(\d+)$/, key: (m) => `bench-${m[1]}-${m[2]}-${m[3]}` },
+  { pattern: /^status$/, key: () => 'status' },
 ];
-/** The job runs daily; let the edge and browsers reuse an answer for a while. */
-const CACHE_SECONDS = 600;
+/** Each entry changes at most daily (most weekly); let the edge and browsers reuse answers. */
+const CACHE_SECONDS = 3600;
 
 export async function onRequest({ request, params, env }) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {

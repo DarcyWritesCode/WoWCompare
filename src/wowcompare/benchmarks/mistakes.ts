@@ -11,9 +11,9 @@ export interface Mistake {
   /** Spell to show with the mistake. */
   spellId: number;
   title: string;
-  /** What the player did vs the top-10 median, e.g. "5.4 vs 6.9 per window". */
+  /** What the player did vs the reference median, e.g. "5.4 vs 6.9 per window". */
   detail: string;
-  /** Estimated DPS lost against the top-10 median. */
+  /** Estimated DPS lost against the reference median. */
   dps: number;
 }
 
@@ -372,7 +372,7 @@ function entryStateMistakes(
 }
 
 /**
- * The player's biggest gaps to the top-10 median, each with a rough DPS cost, biggest first.
+ * The player's biggest gaps to the reference median, each with a rough DPS cost, biggest first.
  * Every estimate values the gap at the player's own damage (casts, DoT damage), so gear
  * differences don't inflate it; they're still estimates, and overlapping causes can double count.
  */

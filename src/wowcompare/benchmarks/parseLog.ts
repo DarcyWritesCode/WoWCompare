@@ -216,7 +216,7 @@ function parseInWorker(config: Config, profile: Profile, ref: LogRef): Promise<L
 
 /**
  * Runs one benchmark log through the same parser and profile as the analyzed log, in a Web
- * Worker. Results are kept for the session. (The nightly job's published top-10 snapshots are
+ * Worker. Results are kept for the session. (The benchmark job's published snapshots are
  * used instead where they match the profile; see `useBenchmarks`.)
  */
 export function parseBenchmarkLog(

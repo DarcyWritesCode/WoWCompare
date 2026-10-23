@@ -13,7 +13,7 @@ import { CompareBar } from './charts';
 const pct = (value: number | null) => (value === null ? '—' : `${formatPercentage(value, 0)}%`);
 
 /**
- * Auto-suggestions from the parsed logs: buffs the top parses keep up that the profile misses,
+ * Auto-suggestions from the parsed logs: buffs the reference parses keep up that the profile misses,
  * and an entry order by how strongly each metric tracks DPS. Accepted suggestions are saved in
  * this browser and take effect on the next analysis.
  */
@@ -25,7 +25,7 @@ export default function Suggestions({
 }: {
   profile: Profile;
   player: LogSnapshot;
-  /** The reference logs (top 10, else #1): what "top parses keep it up" is measured on. */
+  /** The reference logs (else #1): what "reference parses keep it up" is measured on. */
   topLogs: LogSnapshot[];
   /** Every parsed log including the player's: the sample for DPS correlations. */
   allLogs: LogSnapshot[];
@@ -84,9 +84,9 @@ export default function Suggestions({
         )}
       </p>
 
-      <h3>Not in the APL, but top parses keep it up</h3>
+      <h3>Not in the APL, but reference parses keep it up</h3>
       {missing.length === 0 ? (
-        <p className="text-muted">Nothing: the profile covers what the top parses keep up.</p>
+        <p className="text-muted">Nothing: the profile covers what the reference parses keep up.</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table className="table table-condensed">

@@ -8,9 +8,16 @@ export interface Normalization {
   ilvl: boolean;
   /** Show damage as a share of the boss's HP per raid member instead of raw DPS. */
   bossHp: boolean;
+  /** Leave logs with Power Infusion or Augmentation buffs from others out of the reference. */
+  externalBuffs: boolean;
 }
 
-export const NO_NORMALIZATION: Normalization = { killTime: false, ilvl: false, bossHp: false };
+export const DEFAULT_NORMALIZATION: Normalization = {
+  killTime: false,
+  ilvl: false,
+  bossHp: false,
+  externalBuffs: true,
+};
 
 /** Rough DPS gained per item level; real scaling varies by spec and secondary stats. */
 export const DPS_PER_ILVL = 0.01;

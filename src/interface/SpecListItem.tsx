@@ -4,6 +4,8 @@ import classColor from 'game/classColor';
 import Contributor from 'interface/ContributorButton';
 import ReadableListing from 'interface/ReadableListing';
 import Config, { SupportLevel } from 'parser/Config';
+import GameBranch from 'game/GameBranch';
+import LiveCompareStatus from 'wowcompare/ui/LiveCompareStatus';
 
 import SpecIcon from './SpecIcon';
 import { useLingui } from '@lingui/react';
@@ -16,6 +18,7 @@ const SpecListItem = ({
   patchCompatibility,
   supportLevel,
   parser,
+  branch,
 }: Config) => {
   const { i18n } = useLingui();
 
@@ -100,6 +103,9 @@ const SpecListItem = ({
         {/* oxlint-disable-next-line wowanalyzer/no-br -- Baseline suppression */}
         <br />
         {maintainerDescription}
+        {branch === GameBranch.Retail && (
+          <LiveCompareStatus specId={spec.id} wclClassName={spec.wclClassName} />
+        )}
       </div>
     </Component>
   );

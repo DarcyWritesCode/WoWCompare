@@ -4,6 +4,11 @@ import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
+import {
+  AUGMENTATION_MIN_UPTIME,
+  POWER_INFUSION_MIN_UPTIME,
+  REFERENCE_SIZE,
+} from '../benchmarks/reference';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
 import { classSpellMatcher } from '../simc/specs';
@@ -16,7 +21,7 @@ import CooldownDamage from './CooldownDamage';
 import CooldownEntry from './CooldownEntry';
 import ProfileResultsTable, { STATUS_COLORS } from './ProfileResultsTable';
 import Suggestions from './Suggestions';
-import { DPS_PER_ILVL, headline, Normalization, NO_NORMALIZATION } from './normalize';
+import { DEFAULT_NORMALIZATION, DPS_PER_ILVL, headline, Normalization } from './normalize';
 import useBenchmarks, { BenchmarkInputs, BenchmarkKind, BenchmarkReference } from './useBenchmarks';
 import WindowReels from './WindowReels';
 
@@ -24,16 +29,19 @@ import WindowReels from './WindowReels';
 const LOAD_HINTS: Partial<Record<BenchmarkKind, string>> = {
   sameBuild: 'Same build (1 log)',
   bestClose: 'Best close parse (1 log)',
-  top10Close: 'Top 10 close median (up to 10 logs)',
+  close: `Close median (up to ${REFERENCE_SIZE} logs)`,
 };
 
 const NORMALIZATION_KEY = 'wowcompare:normalization';
 
 function readNormalization(): Normalization {
   try {
-    return { ...NO_NORMALIZATION, ...JSON.parse(localStorage.getItem(NORMALIZATION_KEY) ?? '{}') };
+    return {
+      ...DEFAULT_NORMALIZATION,
+      ...JSON.parse(localStorage.getItem(NORMALIZATION_KEY) ?? '{}'),
+    };
   } catch {
-    return NO_NORMALIZATION;
+    return DEFAULT_NORMALIZATION;
   }
 }
 
@@ -64,6 +72,11 @@ function NormalizationControls({
       label: 'Boss HP (raid size)',
       hint: 'Show damage as a share of the boss HP split evenly across the raid; 100% is an even share. Boss HP scales with raid size, so this compares raids of different sizes.',
       disabled: !player.bossHp,
+    },
+    {
+      key: 'externalBuffs',
+      label: 'Leave out PI/Aug-buffed logs',
+      hint: `Leave reference logs out of the median when someone else kept Power Infusion (${POWER_INFUSION_MIN_UPTIME * 100}%+ of the fight) or Ebon Might and Prescience (${AUGMENTATION_MIN_UPTIME * 100}%+) on the player.`,
     },
   ];
   return (
@@ -210,7 +223,7 @@ function Summary({
           </>
         )}
         {!mistakes ? (
-          <>DPS estimates for each mistake appear once the top 10 logs have loaded.</>
+          <>DPS estimates for each mistake appear once the reference logs have loaded.</>
         ) : mistakes.length > 0 ? (
           <>
             The gaps that play can close start with{' '}
@@ -225,7 +238,7 @@ function Summary({
       {topDps.length > 1 && (
         <>
           <p className="text-muted" style={{ marginBottom: 0 }}>
-            Your {unit} among the {topDps.length} reference logs (grey):
+            Your {unit} among the reference logs (grey): {reference.description}.
           </p>
           <DpsStrip you={mine} others={topDps} format={format} unit={unit} />
         </>
@@ -235,8 +248,8 @@ function Summary({
 }
 
 /**
- * The Live Compare tab: this log against the #1 parse and the top 10 (loaded straight away), with
- * the other benchmarks one click each, plus the cooldown window reels. Each section is its own
+ * The Live Compare tab: this log against the #1 parse and the reference logs (loaded straight
+ * away), with the other benchmarks one click each, plus the cooldown window reels. Each section is its own
  * panel, as on WoWAnalyzer's other tabs.
  */
 export default function ProfileView({
@@ -256,21 +269,21 @@ export default function ProfileView({
     () => benchmarkInputs && { ...benchmarkInputs, playerResults: snapshot.results },
     [benchmarkInputs, snapshot],
   );
+  const [normalization, setNormalizationState] = useState(readNormalization);
   const {
     status,
     busy,
     load,
     loaded,
     available,
-    rankingCount,
+    poolSize,
     columns,
     logs,
     reference,
     playerResults,
-  } = useBenchmarks(inputs);
+  } = useBenchmarks(inputs, normalization.externalBuffs);
   const results = playerResults ?? snapshot.results;
   useOpenDetailsForPrint();
-  const [normalization, setNormalizationState] = useState(readNormalization);
   const setNormalization = (value: Normalization) => {
     setNormalizationState(value);
     try {
@@ -281,8 +294,8 @@ export default function ProfileView({
   };
   const source = profile.source;
   // Estimates against the #1 parse alone swing wildly (one log's windows), so they wait for the
-  // top 10, unless it can't load at all.
-  const mistakesReady = loaded.includes('top10') || (!busy && reference !== null);
+  // reference logs, unless they can't load at all.
+  const mistakesReady = loaded.includes('reference') || (!busy && reference !== null);
   const mistakes = useMemo(
     () =>
       reference && mistakesReady
@@ -363,7 +376,7 @@ export default function ProfileView({
               referenceLabel={reference.label}
             />
           ) : (
-            <p className="text-muted">Estimates appear once the top 10 logs have loaded.</p>
+            <p className="text-muted">Estimates appear once the reference logs have loaded.</p>
           )}
         </Panel>
       )}
@@ -408,13 +421,13 @@ export default function ProfileView({
 
           <Panel
             title="Benchmarks"
-            explanation={`From ${rankingCount} ranked parses. Close = ilvl ±5, kill time ±20%, raid size ±5.`}
+            explanation={`Scored against ${reference.label}: ${reference.description}. #1 is shown as the ceiling. Same build and close come from the ${poolSize} ranked parses around the reference. Close = ilvl ±5, kill time ±20%, raid size ±5.`}
           >
             <BenchmarkTable player={{ ...snapshot, results }} benchmarks={columns} />
           </Panel>
 
           <Panel
-            title="APL expectations vs top parses"
+            title="APL expectations vs reference parses"
             explanation={`What the APL asks for, and how often ${reference.label} actually does it. "Favoured" lines are ones the APL prefers under a buff without requiring it.`}
           >
             <AplExpectations player={snapshot.results} topLogs={reference.logs} />

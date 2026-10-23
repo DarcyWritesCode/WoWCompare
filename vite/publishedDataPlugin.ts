@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 
 /**
- * WoWCompare: the nightly benchmark data for the dev/preview server, read from the directory the
+ * WoWCompare: the benchmark job's data for the dev/preview server, read from the directory the
  * job writes with `--local` (see scripts/benchmarks/README.md). Mirrors functions/wc-api/ so both
  * behave the same; read-only like it.
  */
@@ -13,6 +13,7 @@ const LOCAL_DIR = path.resolve('node_modules/.cache/wowcompare-published');
 const ROUTES: { pattern: RegExp; key: (m: RegExpExecArray) => string }[] = [
   { pattern: /^profiles\/(\d+)$/, key: (m) => `profile-${m[1]}` },
   { pattern: /^benchmarks\/(\d+)\/(\d+)\/(\d+)$/, key: (m) => `bench-${m[1]}-${m[2]}-${m[3]}` },
+  { pattern: /^status$/, key: () => 'status' },
 ];
 
 function handle(req: IncomingMessage, res: ServerResponse, next: () => void) {

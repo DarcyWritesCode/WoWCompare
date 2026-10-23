@@ -1,8 +1,10 @@
 /**
- * Nightly benchmark job: builds each spec's profile from SimC's current APL, then for every boss
- * of the current raid (Heroic and Mythic) fetches the spec's rankings and parses the top 10 logs
- * with the app's own parser. Publishes both to Cloudflare KV, where the app reads them read-only
- * (functions/wc-api/). See README.md next to this file for setup.
+ * Benchmark job, run daily: rebuilds the classes scheduled for today (see
+ * src/wowcompare/benchmarks/schedule.ts) plus any spec whose benchmarks have gone stale. For each
+ * spec it builds the profile from SimC's current APL, then for every boss of the current raid
+ * (Heroic and Mythic) fetches the rankings around the reference percentile and parses the #1 and
+ * the reference candidates with the app's own parser. Publishes everything to Cloudflare KV, where
+ * the app reads it read-only (functions/wc-api/). See README.md next to this file for setup.
  *
  * Built by Vite (`pnpm benchmarks:build`) so the parser's aliases, macros and asset imports
  * resolve exactly as in the app, then run with Node (`pnpm benchmarks:run`).
@@ -22,15 +24,26 @@ import configs from 'parser';
 import Config from 'parser/Config';
 import { parseLogSnapshot } from 'wowcompare/benchmarks/parseLog';
 import {
+  AplCommit,
   BenchmarkBundle,
+  BenchmarkStatus,
+  BundleStatus,
   bundleKey,
   logKey,
   profileFingerprint,
   profileKey,
   PublishedProfile,
   SNAPSHOT_VERSION,
+  SpecStatus,
+  STATUS_KEY,
 } from 'wowcompare/benchmarks/published';
-import { fetchRankings } from 'wowcompare/benchmarks/rankings';
+import { fetchRankingsPool, RankedParse } from 'wowcompare/benchmarks/rankings';
+import {
+  isExternallyBuffed,
+  REFERENCE_PERCENTILE,
+  selectReference,
+} from 'wowcompare/benchmarks/reference';
+import { STALE_AFTER_MS, updateDay, WEEKDAY_NAMES } from 'wowcompare/benchmarks/schedule';
 import { LogSnapshot } from 'wowcompare/metrics/results';
 import { aplUrl, hasSimcApl, setProfile } from 'wowcompare/profile/registry';
 import { buildProfile } from 'wowcompare/simc/buildProfile';
@@ -38,16 +51,15 @@ import { getAdapter } from 'wowcompare/simc/specs';
 
 /** WCL difficulty IDs, Mythic first so a run cut short by the time limit still covers it. */
 const DIFFICULTIES = [5, 4];
-/** Logs parsed per boss: the app auto-loads the #1 parse and the top-10 median. */
-const TOP_N = 10;
 /** A log that takes longer is skipped (and retried on the next run). */
 const LOG_TIMEOUT_MS = 120_000;
-/** KV entries outlive a few failed nightly runs, then expire rather than go stale forever. */
-const KV_TTL_SECONDS = 7 * 24 * 60 * 60;
-/** Unchanged entries are rewritten this often anyway, to renew their TTL. */
-const REWRITE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
-/** Parsed logs not reused for this long are dropped from the job's own cache. */
-const CACHE_PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * KV entries are rewritten weekly; this lets them outlive two missed weeks, then expire rather
+ * than go stale forever.
+ */
+const KV_TTL_SECONDS = 21 * 24 * 60 * 60;
+/** Parsed logs not reused for this long are dropped from the job's own cache (a week + slack). */
+const CACHE_PRUNE_AFTER_MS = 9 * 24 * 60 * 60 * 1000;
 /** Pause before spending the last 5% of the hourly WCL budget. */
 const RATE_LIMIT_HEADROOM = 0.05;
 const RATE_LIMIT_CHECK_MS = 30_000;
@@ -65,8 +77,13 @@ const { values: args } = parseArgs({
   options: {
     /** Write to the dev server's directory instead of Cloudflare KV. */
     local: { type: 'boolean', default: false },
-    /** Only these specs, by WCL spec name (`Feral`) or `Class:Spec` (`Druid:Feral`). */
+    /**
+     * Only these specs, in this order, whatever the schedule says: a WCL class (`Druid`), spec
+     * (`Feral`) or both (`Druid:Feral`).
+     */
     spec: { type: 'string', multiple: true, default: [] },
+    /** Every spec, whatever the schedule says (after any `--spec` ones). */
+    all: { type: 'boolean', default: false },
     /** These encounter IDs instead of the current raid (required in v1 mode). */
     encounter: { type: 'string', multiple: true, default: [] },
     difficulty: { type: 'string', multiple: true, default: [] },
@@ -176,7 +193,12 @@ const NOT_A_RAID = /\((PTR|Beta)\)|Complete Raid/i;
  * The bosses of the current raid(s): unfrozen zones of the newest expansion that has any, with
  * both Heroic and Mythic. Comes from WCL so a new tier or expansion needs no code change.
  */
-async function currentRaidEncounters(): Promise<number[]> {
+interface Encounter {
+  id: number;
+  name: string | null;
+}
+
+async function currentRaidEncounters(): Promise<Encounter[]> {
   const data = await wclQuery<{
     worldData: {
       expansions: {
@@ -186,12 +208,12 @@ async function currentRaidEncounters(): Promise<number[]> {
           name: string;
           frozen: boolean;
           difficulties: { id: number }[] | null;
-          encounters: { id: number }[] | null;
+          encounters: { id: number; name: string }[] | null;
         }[];
       }[];
     };
   }>(
-    'query { worldData { expansions { id name zones { name frozen difficulties { id } encounters { id } } } } }',
+    'query { worldData { expansions { id name zones { name frozen difficulties { id } encounters { id name } } } } }',
     {},
   );
   const expansions = [...data.worldData.expansions].sort((a, b) => b.id - a.id);
@@ -205,7 +227,7 @@ async function currentRaidEncounters(): Promise<number[]> {
     );
     if (raids.length > 0) {
       say(`Current raid: ${expansion.name}: ${raids.map((zone) => zone.name).join(', ')}`);
-      return raids.flatMap((zone) => zone.encounters!.map((encounter) => encounter.id));
+      return raids.flatMap((zone) => zone.encounters!);
     }
   }
   throw new Error('No current raid zone found on Warcraft Logs');
@@ -306,23 +328,14 @@ async function ensureKvNamespace(): Promise<string> {
   return id;
 }
 
-/**
- * Where published data goes: Cloudflare KV, or the dev server's directory with `--local`. KV
- * writes are skipped when nothing changed since a recent write, to stay inside KV's daily write
- * limit (1,000 on the free plan).
- */
+/** Where published data goes: Cloudflare KV, or the dev server's directory with `--local`. */
 class Store {
-  private readonly manifestFile = path.join(cacheDir, 'kv-manifest.json');
-  private readonly manifest: Record<string, { hash: string; writtenAt: number }> = {};
-
   private constructor(
     private readonly local: boolean,
     private readonly namespaceId: string | null,
   ) {
     if (local) {
       fs.mkdirSync(LOCAL_DIR, { recursive: true });
-    } else if (fs.existsSync(this.manifestFile)) {
-      this.manifest = JSON.parse(fs.readFileSync(this.manifestFile, 'utf8'));
     }
   }
 
@@ -330,47 +343,77 @@ class Store {
     return new Store(local, local ? null : await ensureKvNamespace());
   }
 
-  /** Writes `value` unless `identity` (its content minus timestamps) is unchanged and recent. */
-  async put(key: string, value: unknown, identity: unknown): Promise<boolean> {
+  private valuePath(key: string) {
+    return `/storage/kv/namespaces/${this.namespaceId}/values/${encodeURIComponent(key)}`;
+  }
+
+  async put(key: string, value: unknown) {
     const body = JSON.stringify(value);
     if (this.local) {
       fs.writeFileSync(path.join(LOCAL_DIR, `${key}.json`), body);
-      return true;
+    } else {
+      await cloudflare('PUT', `${this.valuePath(key)}?expiration_ttl=${KV_TTL_SECONDS}`, body);
     }
-    const hash = sha1(JSON.stringify(identity));
-    const previous = this.manifest[key];
-    if (previous?.hash === hash && Date.now() - previous.writtenAt < REWRITE_AFTER_MS) {
-      return false;
-    }
-    await cloudflare(
-      'PUT',
-      `/storage/kv/namespaces/${this.namespaceId}/values/${encodeURIComponent(key)}?expiration_ttl=${KV_TTL_SECONDS}`,
-      body,
-    );
-    this.manifest[key] = { hash, writtenAt: Date.now() };
-    return true;
+    stats.published += 1;
   }
 
-  save() {
-    if (!this.local) {
-      fs.writeFileSync(this.manifestFile, JSON.stringify(this.manifest));
+  async get<T>(key: string): Promise<T | null> {
+    if (this.local) {
+      const file = path.join(LOCAL_DIR, `${key}.json`);
+      return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as T) : null;
     }
+    // KV values come back raw, not in Cloudflare's `{ result }` envelope.
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${requireEnv('CLOUDFLARE_ACCOUNT_ID')}${this.valuePath(key)}`,
+      { headers: { Authorization: `Bearer ${requireEnv('CLOUDFLARE_API_TOKEN')}` } },
+    );
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`Cloudflare GET ${key} failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as T;
   }
 }
 
-const stats = { published: 0, unchanged: 0, parsed: 0, reused: 0, failedLogs: 0, failedBosses: 0 };
+const stats = { published: 0, parsed: 0, reused: 0, failedLogs: 0, failedBosses: 0 };
 
-function selectedSpecs(): Config[] {
-  const wanted = args.spec.map((s) => s.toLowerCase());
-  return configs.filter((config) => {
-    const { wclClassName, wclSpecName } = config.spec;
-    const names = [wclSpecName, `${wclClassName}:${wclSpecName}`].map((n) => n.toLowerCase());
-    return (
-      config.parser !== undefined &&
-      hasSimcApl(config.spec.id) &&
-      (wanted.length === 0 || names.some((name) => wanted.includes(name)))
+const specName = (config: Config) => `${config.spec.wclSpecName} ${config.spec.wclClassName}`;
+
+/**
+ * The specs to rebuild, in order: `--spec` entries in the order given, then every other spec with
+ * `--all`; without either, the classes scheduled for today, then specs not completed within
+ * `STALE_AFTER_MS` (a failed or cut-short run, or a spec never built), oldest first.
+ */
+function specsToBuild(status: BenchmarkStatus): Config[] {
+  const withApl = configs.filter(
+    (config) => config.parser !== undefined && hasSimcApl(config.spec.id),
+  );
+  if (args.all || args.spec.length > 0) {
+    const named = args.spec.flatMap((wanted) =>
+      withApl.filter((config) => {
+        const { wclClassName, wclSpecName } = config.spec;
+        return [wclClassName, wclSpecName, `${wclClassName}:${wclSpecName}`].some(
+          (name) => name.toLowerCase() === wanted.toLowerCase(),
+        );
+      }),
     );
-  });
+    const ordered = [...new Set(named)];
+    return args.all ? [...ordered, ...withApl.filter((c) => !ordered.includes(c))] : ordered;
+  }
+  const today = new Date().getUTCDay();
+  const completedAt = (config: Config) => status.specs[config.spec.id]?.completedAt ?? 0;
+  const scheduled = withApl.filter((config) => updateDay(config.spec.wclClassName) === today);
+  const stale = withApl
+    .filter(
+      (config) => !scheduled.includes(config) && Date.now() - completedAt(config) > STALE_AFTER_MS,
+    )
+    .sort((a, b) => completedAt(a) - completedAt(b));
+  say(
+    `${WEEKDAY_NAMES[today]}: ${scheduled.length} scheduled specs, ${stale.length} stale ones to catch up`,
+  );
+  return [...scheduled, ...stale];
 }
 
 async function fetchText(url: string): Promise<string> {
@@ -387,6 +430,30 @@ async function fetchText(url: string): Promise<string> {
       }
       await sleep(attempt * 5_000);
     }
+  }
+}
+
+/**
+ * The SimC commit that last touched the APL, for the specs page. Uses `GITHUB_TOKEN` when set
+ * (Actions provides one), since unauthenticated calls are limited to 60 an hour.
+ */
+async function aplCommit(simcFile: string): Promise<AplCommit | null> {
+  const token = process.env.GITHUB_TOKEN;
+  try {
+    const response = await withTimeout(
+      fetch(
+        `https://api.github.com/repos/simulationcraft/simc/commits?path=ActionPriorityLists/default/${simcFile}.simc&per_page=1`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      ),
+      15_000,
+      'GitHub commits',
+    );
+    const [commit] = response.ok
+      ? ((await response.json()) as { sha: string; commit: { committer: { date: string } } }[])
+      : [];
+    return commit ? { sha: commit.sha, date: commit.commit.committer.date } : null;
+  } catch {
+    return null;
   }
 }
 
@@ -407,86 +474,173 @@ async function publishProfile(config: Config, store: Store): Promise<PublishedPr
     profile,
     unresolved,
     builtAt: Date.now(),
+    aplCommit: await aplCommit(adapter.simcFile),
   };
   setProfile(config.spec.id, profile);
-  const written = await store.put(profileKey(config.spec.id), published, {
-    version: SNAPSHOT_VERSION,
-    fingerprint: profileFingerprint(profile),
-    unresolved,
-  });
-  stats[written ? 'published' : 'unchanged'] += 1;
+  await store.put(profileKey(config.spec.id), published);
   return published;
 }
 
-/** Rankings plus the parsed top 10 for one spec on one boss and difficulty. */
+/** Parses `parse` for `config`, reusing the job's cache; null if it failed. */
+async function snapshotOf(
+  config: Config,
+  fingerprint: string,
+  parse: RankedParse,
+  cache: SnapshotCache,
+  budget: RateBudget,
+): Promise<LogSnapshot | null> {
+  const ref = {
+    reportCode: parse.reportCode,
+    fightId: parse.fightId,
+    playerName: parse.name,
+    serverName: parse.serverName,
+  };
+  const cacheKey = `v${SNAPSHOT_VERSION}:${fingerprint}:${logKey(ref)}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    stats.reused += 1;
+    return cached;
+  }
+  await budget.ensure();
+  try {
+    const snapshot = await withTimeout(parseLogSnapshot(config, ref), LOG_TIMEOUT_MS, logKey(ref));
+    if (snapshot) {
+      cache.set(cacheKey, snapshot);
+      stats.parsed += 1;
+    }
+    return snapshot;
+  } catch (err) {
+    if (err instanceof OutOfTime) {
+      throw err;
+    }
+    stats.failedLogs += 1;
+    say(`  ${logKey(ref)}: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+/** The #1 and the reference candidates for one spec on one boss and difficulty. */
 async function publishBundle(
   config: Config,
   published: PublishedProfile,
-  encounterId: number,
+  encounter: Encounter,
   difficulty: number,
   store: Store,
   cache: SnapshotCache,
   budget: RateBudget,
-) {
+): Promise<BundleStatus | null> {
   const { spec } = config;
   await budget.ensure();
-  const rankings = await fetchRankings({
-    encounterId,
-    difficulty,
-    className: spec.wclClassName,
-    specName: spec.wclSpecName,
-    metric: spec.role === ROLES.HEALER ? 'hps' : 'dps',
-  });
-  if (rankings.length === 0) {
-    return;
+  const rankings = await fetchRankingsPool(
+    {
+      encounterId: encounter.id,
+      difficulty,
+      className: spec.wclClassName,
+      specName: spec.wclSpecName,
+      metric: spec.role === ROLES.HEALER ? 'hps' : 'dps',
+    },
+    REFERENCE_PERCENTILE,
+  );
+  if (!rankings.top) {
+    return null;
   }
-
-  const fingerprint = profileFingerprint(published.profile);
-  const snapshots: Record<string, LogSnapshot> = {};
-  await eachLimit(rankings.slice(0, TOP_N), Number(args.concurrency), async (parse) => {
-    const ref = {
-      reportCode: parse.reportCode,
-      fightId: parse.fightId,
-      playerName: parse.name,
-      serverName: parse.serverName,
-    };
-    const cacheKey = `v${SNAPSHOT_VERSION}:${fingerprint}:${logKey(ref)}`;
-    let snapshot = cache.get(cacheKey);
-    if (snapshot) {
-      stats.reused += 1;
-    } else {
-      await budget.ensure();
-      try {
-        snapshot = await withTimeout(parseLogSnapshot(config, ref), LOG_TIMEOUT_MS, logKey(ref));
-      } catch (err) {
-        stats.failedLogs += 1;
-        say(`  ${logKey(ref)}: ${(err as Error).message}`);
-        return;
-      }
-      if (!snapshot) {
-        return;
-      }
-      cache.set(cacheKey, snapshot);
-      stats.parsed += 1;
-    }
-    snapshots[logKey(ref)] = snapshot;
-  });
-
   const bundle: BenchmarkBundle = {
     snapshotVersion: SNAPSHOT_VERSION,
     specId: spec.id,
-    encounterId,
+    encounterId: encounter.id,
     difficulty,
-    builtAt: Date.now(),
-    profileFingerprint: fingerprint,
-    rankings,
-    snapshots,
+    builtAt: 0,
+    profileFingerprint: profileFingerprint(published.profile),
+    ...rankings,
+    reference: selectReference(rankings.pool, rankings.totalParses),
+    snapshots: {},
   };
-  // Rankings shift a little every day; only a new profile or top-10 lineup forces a rewrite
-  // before the periodic one, which keeps KV writes down.
-  const identity = { fingerprint, logs: Object.keys(snapshots).sort() };
-  const written = await store.put(bundleKey(spec.id, encounterId, difficulty), bundle, identity);
-  stats[written ? 'published' : 'unchanged'] += 1;
+  const { candidates } = bundle.reference;
+  const parses = [rankings.top, ...candidates.filter((c) => c !== rankings.top)];
+  let failed = 0;
+  await eachLimit(parses, Number(args.concurrency), async (parse) => {
+    const snapshot = await snapshotOf(config, bundle.profileFingerprint, parse, cache, budget);
+    if (snapshot) {
+      bundle.snapshots[logKey({ ...parse, playerName: parse.name })] = snapshot;
+    } else if (candidates.includes(parse)) {
+      failed += 1;
+    }
+  });
+  bundle.builtAt = Date.now();
+  await store.put(bundleKey(spec.id, encounter.id, difficulty), bundle);
+
+  const parsed = candidates
+    .map((c) => bundle.snapshots[logKey({ ...c, playerName: c.name })])
+    .filter((snapshot): snapshot is LogSnapshot => !!snapshot);
+  const ranks = candidates.map((c) => c.rank);
+  return {
+    encounterId: encounter.id,
+    encounterName: encounter.name,
+    difficulty,
+    builtAt: bundle.builtAt,
+    totalParses: rankings.totalParses,
+    ranks: ranks.length > 0 ? [Math.min(...ranks), Math.max(...ranks)] : null,
+    logs: parsed.length,
+    buffed: parsed.filter(isExternallyBuffed).length,
+    failed,
+  };
+}
+
+/** Rebuilds one spec: its profile, then every boss and difficulty, updating `status` as it goes. */
+async function buildSpec(
+  config: Config,
+  encounters: Encounter[],
+  difficulties: number[],
+  status: BenchmarkStatus,
+  store: Store,
+  cache: SnapshotCache,
+  budget: RateBudget,
+) {
+  const published = await publishProfile(config, store);
+  const previous = status.specs[config.spec.id];
+  const entry: SpecStatus = {
+    specId: config.spec.id,
+    profileBuiltAt: published.builtAt,
+    aplCommit: published.aplCommit,
+    completedAt: null,
+    // Earlier bundles stay listed until rebuilt.
+    bundles: previous?.bundles ?? [],
+  };
+  status.specs[config.spec.id] = entry;
+  for (const difficulty of difficulties) {
+    for (const encounter of encounters) {
+      const label = `${specName(config)}, ${encounter.name ?? encounter.id}, difficulty ${difficulty}`;
+      try {
+        const bundle = await publishBundle(
+          config,
+          published,
+          encounter,
+          difficulty,
+          store,
+          cache,
+          budget,
+        );
+        if (bundle) {
+          entry.bundles = [
+            ...entry.bundles.filter(
+              (b) => b.encounterId !== encounter.id || b.difficulty !== difficulty,
+            ),
+            bundle,
+          ];
+        }
+        say(label);
+      } catch (err) {
+        if (err instanceof OutOfTime) {
+          throw err;
+        }
+        stats.failedBosses += 1;
+        say(`${label}: ${(err as Error).message}`);
+      }
+    }
+  }
+  // Bosses no longer in the current raid drop out of the summary.
+  entry.bundles = entry.bundles.filter((b) => encounters.some((e) => e.id === b.encounterId));
+  entry.completedAt = Date.now();
 }
 
 async function main() {
@@ -499,59 +653,53 @@ async function main() {
   const cache = new SnapshotCache();
   const budget = new RateBudget();
 
-  const specs = selectedSpecs();
-  const encounters =
-    args.encounter.length > 0 ? args.encounter.map(Number) : await currentRaidEncounters();
+  const published = await store.get<BenchmarkStatus>(STATUS_KEY);
+  const status: BenchmarkStatus =
+    published?.snapshotVersion === SNAPSHOT_VERSION
+      ? published
+      : { snapshotVersion: SNAPSHOT_VERSION, updatedAt: 0, specs: {} };
+  const saveStatus = async () => {
+    status.updatedAt = Date.now();
+    await store.put(STATUS_KEY, status);
+  };
+
+  const specs = specsToBuild(status);
+  const encounters: Encounter[] =
+    args.encounter.length > 0
+      ? args.encounter.map((id) => ({ id: Number(id), name: null }))
+      : await currentRaidEncounters();
   const difficulties = args.difficulty.length > 0 ? args.difficulty.map(Number) : DIFFICULTIES;
   say(`${specs.length} specs × ${encounters.length} bosses × ${difficulties.length} difficulties`);
 
-  // Profiles first: a bundle is only usable with the profile it was parsed with.
-  const profiles = new Map<number, PublishedProfile>();
-  for (const config of specs) {
-    try {
-      profiles.set(config.spec.id, await publishProfile(config, store));
-    } catch (err) {
-      say(`${config.spec.wclSpecName} ${config.spec.wclClassName}: ${(err as Error).message}`);
-    }
-  }
-
   try {
-    for (const difficulty of difficulties) {
-      for (const encounterId of encounters) {
-        for (const config of specs) {
-          const published = profiles.get(config.spec.id);
-          if (!published) {
-            continue;
-          }
-          const label = `${config.spec.wclSpecName} ${config.spec.wclClassName}, encounter ${encounterId}, difficulty ${difficulty}`;
-          try {
-            await publishBundle(config, published, encounterId, difficulty, store, cache, budget);
-            say(label);
-          } catch (err) {
-            if (err instanceof OutOfTime) {
-              throw err;
-            }
-            stats.failedBosses += 1;
-            say(`${label}: ${(err as Error).message}`);
-          }
+    for (const config of specs) {
+      try {
+        await buildSpec(config, encounters, difficulties, status, store, cache, budget);
+      } catch (err) {
+        if (err instanceof OutOfTime) {
+          throw err;
         }
+        say(`${specName(config)}: ${(err as Error).message}`);
       }
+      // After each spec, so a run that's killed still leaves the summary current.
+      await saveStatus();
     }
   } catch (err) {
     if (!(err instanceof OutOfTime)) {
       throw err;
     }
+    await saveStatus();
     say('Out of time; the rest is left for the next run.');
   } finally {
-    store.save();
     cache.prune();
   }
 
   say(
-    `Done. Published ${stats.published}, unchanged ${stats.unchanged}; logs parsed ${stats.parsed}, reused ${stats.reused}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
+    `Done. Published ${stats.published}; logs parsed ${stats.parsed}, reused ${stats.reused}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
   );
-  // Fail the workflow only when nothing worked, so one bad log or boss doesn't page anyone.
-  return stats.published + stats.unchanged > 0 ? 0 : 1;
+  // Fail the workflow only when nothing worked, so one bad log or boss doesn't page anyone. A day
+  // with nothing due is fine.
+  return specs.length === 0 || stats.published > 0 ? 0 : 1;
 }
 
 main().then(
