@@ -1,4 +1,4 @@
-import { Profile, ProfileEntry } from './types';
+import { entryKey, Profile, ProfileEntry } from './types';
 
 /**
  * Suggestions a viewer accepted for a spec, kept in this browser until profiles are stored
@@ -6,7 +6,10 @@ import { Profile, ProfileEntry } from './types';
  */
 export interface Customization {
   extraEntries: Omit<ProfileEntry, 'rank'>[];
-  /** Entry tokens, most important first; entries not listed keep their order after these. */
+  /**
+   * Entries by `entryKey`, most important first; entries not listed keep their order after
+   * these. Saved before keys had a kind, an item may be a bare token, which matches every kind.
+   */
   rankOrder?: string[];
 }
 
@@ -38,16 +41,17 @@ export function applyCustomization(profile: Profile, customization: Customizatio
   if (!customization) {
     return profile;
   }
-  const tokens = new Set(profile.entries.map((e) => e.token));
+  const keys = new Set(profile.entries.map(entryKey));
   const entries = [
     ...profile.entries,
     ...customization.extraEntries
-      .filter((e) => !tokens.has(e.token))
+      .filter((e) => !keys.has(entryKey(e)))
       .map((e) => ({ ...e, rank: 0 })),
   ];
   const order = customization.rankOrder ?? [];
   const position = (entry: ProfileEntry) => {
-    const i = order.indexOf(entry.token);
+    const exact = order.indexOf(entryKey(entry));
+    const i = exact !== -1 ? exact : order.indexOf(entry.token);
     return i === -1 ? order.length + entries.indexOf(entry) : i;
   };
   return {

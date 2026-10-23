@@ -83,6 +83,22 @@ function closingParen(expr: string): number {
 /** Disjuncts that only cover the end of the fight, e.g. `fight_remains<5`. */
 const END_OF_FIGHT = /^fight_remains\s*[<>=]/;
 
+/** Disjuncts about the fight or target ending, e.g. `fight_remains<=10|target.time_to_die-remains<=9`. */
+const ENDING = /fight_remains|time_to_die/;
+
+/**
+ * The expression without top-level disjuncts about the fight ending: "or cast it anyway because
+ * the fight is ending" says nothing about why the action is normally cast.
+ */
+export function withoutEndOfFight(expr: string | undefined): string {
+  if (!expr) {
+    return '';
+  }
+  const disjuncts = splitTopLevel(unwrap(expr), '|');
+  const kept = disjuncts.filter((d) => !ENDING.test(d));
+  return (kept.length > 0 ? kept : disjuncts).join('|');
+}
+
 /**
  * The conditions that must all hold for the action to run, when the expression is a plain
  * conjunction. End-of-fight escape hatches (`...|fight_remains<5`) are ignored; any other `|`

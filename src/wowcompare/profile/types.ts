@@ -31,6 +31,13 @@ export interface SpellRef {
   spellIds: number[];
 }
 
+/**
+ * Identifies an entry within a profile. The token alone isn't enough: one SimC token can be both a
+ * cooldown and a DoT (Guardian's Thrash, BM's Barbed Shot), giving two entries.
+ */
+export const entryKey = (entry: { kind: EntryKind; token: string }) =>
+  `${entry.kind}:${entry.token}`;
+
 export interface ProfileEntry extends SpellRef {
   kind: EntryKind;
   /** 1 = most important. */

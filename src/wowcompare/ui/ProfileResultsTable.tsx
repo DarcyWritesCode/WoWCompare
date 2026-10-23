@@ -1,8 +1,8 @@
 import { formatNumber, formatPercentage } from 'common/format';
 import { SpellLink } from 'interface';
 
-import { MetricKind } from '../profile/types';
-import { LogSnapshot, ProfileResults, ScoredMetric, Status } from '../metrics/results';
+import { entryKey, MetricKind } from '../profile/types';
+import { LogSnapshot, ProfileResults, ScoredEntry, ScoredMetric, Status } from '../metrics/results';
 import { CompareBar, CompareLegend, tint } from './charts';
 
 export const METRIC_ORDER: MetricKind[] = ['uptime', 'procUsage', 'cooldownUsage', 'windowDps'];
@@ -87,17 +87,18 @@ export default function ProfileResultsTable({
   /** Median results and logs to draw each value against, once benchmarks have loaded. */
   reference?: { label: string; results: ProfileResults; logs: LogSnapshot[] };
 }) {
-  const compare = (token: string, kind: MetricKind): Comparison | undefined => {
+  const compare = (entry: ScoredEntry, kind: MetricKind): Comparison | undefined => {
     if (!reference) {
       return undefined;
     }
+    const key = entryKey(entry);
     const values = reference.logs
-      .map((log) => log.results.entries.find((e) => e.token === token))
+      .map((log) => log.results.entries.find((e) => entryKey(e) === key))
       .filter((e) => e?.applicable)
       .map((e) => e!.metrics[kind]?.value)
       .filter((v): v is number => typeof v === 'number');
     const median =
-      reference.results.entries.find((e) => e.token === token)?.metrics[kind]?.value ?? null;
+      reference.results.entries.find((e) => entryKey(e) === key)?.metrics[kind]?.value ?? null;
     return {
       median,
       range: values.length > 1 ? [Math.min(...values), Math.max(...values)] : undefined,
@@ -139,7 +140,7 @@ export default function ProfileResultsTable({
                     key={kind}
                     kind={kind}
                     metric={entry.metrics[kind]}
-                    comparison={compare(entry.token, kind)}
+                    comparison={compare(entry, kind)}
                   />
                 ))}
               </tr>

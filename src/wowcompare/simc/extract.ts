@@ -6,6 +6,7 @@ import {
   positiveBuffChecks,
   references,
   requiredConjuncts,
+  withoutEndOfFight,
 } from './apl';
 
 /** Actions that are APL plumbing or generic consumables, not spec cooldowns. */
@@ -126,10 +127,31 @@ export function summarizeApl(text: string): AplSummary {
     return found?.index ?? Number.MAX_SAFE_INTEGER;
   };
 
-  // Cooldowns: anything the APL tracks with `cooldown.x`, plus the casts in its cooldown lists.
+  // Dots: actions the APL refreshes based on their own duration (`refreshable`, bare `remains` /
+  // `ticking`, or `dot.<self>.*`), outside AoE-only lists. End-of-fight clauses don't count:
+  // Shadow Dance's `target.time_to_die-remains<=9` is about its buff running out, not a DoT.
+  const dotTokens = new Set<string>();
+  for (const action of actions) {
+    if (isAoeList(action.list) || META_ACTIONS.has(action.name)) {
+      continue;
+    }
+    const conditions = `${withoutEndOfFight(action.options.if)} ${action.options.target_if ?? ''}`;
+    const selfDot = new RegExp(`(^|[^a-z0-9_.])dot\\.${action.name}\\.`);
+    if (
+      /(^|[^.a-z0-9_])(refreshable|remains|ticking)\b/.test(conditions) ||
+      selfDot.test(conditions)
+    ) {
+      dotTokens.add(action.name);
+    }
+  }
+
+  // Cooldowns: anything the APL tracks with `cooldown.x`, plus the casts in its cooldown lists,
+  // except DoTs refreshed there to line up with a cooldown (Balance's Moonfire before Fury of Elune).
   const cooldownTokens = new Set<string>([
     ...actions.flatMap((a) => Object.values(a.options).flatMap((v) => references(v, 'cooldown'))),
-    ...actions.filter((a) => /^(cooldowns?|cds?)$/.test(a.list)).map((a) => a.name),
+    ...actions
+      .filter((a) => /^(cooldowns?|cds?)$/.test(a.list) && !dotTokens.has(a.name))
+      .map((a) => a.name),
   ]);
   for (const token of [...cooldownTokens]) {
     if (META_ACTIONS.has(token) || IGNORED_TOKENS.has(token)) {
@@ -223,22 +245,6 @@ export function summarizeApl(text: string): AplSummary {
     consumers: [...set],
   }));
 
-  // Dots: actions the APL refreshes based on their own duration (`refreshable`, bare `remains` /
-  // `ticking`, or `dot.<self>.*`), outside AoE-only lists.
-  const dotTokens = new Set<string>();
-  for (const action of actions) {
-    if (isAoeList(action.list) || META_ACTIONS.has(action.name)) {
-      continue;
-    }
-    const conditions = `${action.options.if ?? ''} ${action.options.target_if ?? ''}`;
-    const selfDot = new RegExp(`(^|[^a-z0-9_.])dot\\.${action.name}\\.`);
-    if (
-      /(^|[^.a-z0-9_])(refreshable|remains|ticking)\b/.test(conditions) ||
-      selfDot.test(conditions)
-    ) {
-      dotTokens.add(action.name);
-    }
-  }
   const dots: AplDot[] = [...dotTokens].map((token) => ({ token, order: firstIndex(token) }));
 
   const byOrder = (a: { order: number }, b: { order: number }) => a.order - b.order;

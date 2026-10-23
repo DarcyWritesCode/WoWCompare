@@ -74,7 +74,7 @@ function windowMistakes(profile: Profile, player: LogSnapshot, topLogs: LogSnaps
     );
     const myDamage = windowDamage(set);
     // The extra seconds would have earned normal damage anyway; only the window's lift counts.
-    const index = profile.entries.findIndex((e) => e.token === set.token);
+    const index = profile.entries.findIndex((e) => e.kind === 'cooldown' && e.token === set.token);
     const outside = player.results.entries[index]?.metrics.windowDps?.detail;
     const outsideDps =
       outside?.timeOut && outside.damageOut != null
@@ -284,7 +284,7 @@ function entryStateMistakes(
 
     // Resources: each point pooled is spent inside the window instead of outside it, so it
     // gains the window's extra damage on top of what the spender does anyway.
-    const index = profile.entries.findIndex((e) => e.token === set.token);
+    const index = profile.entries.findIndex((e) => e.kind === 'cooldown' && e.token === set.token);
     const ratio = player.results.entries[index]?.metrics.windowDps?.value ?? null;
     for (const resource of Object.keys(mine[0].state.resources)) {
       const at = (list: WindowSample[]) =>

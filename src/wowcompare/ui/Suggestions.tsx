@@ -6,7 +6,7 @@ import { missingAuras, suggestRanks } from '../benchmarks/suggest';
 import { classSpellMatcher } from '../simc/specs';
 import { LogSnapshot } from '../metrics/results';
 import { Customization, readCustomization, writeCustomization } from '../profile/customizations';
-import { Profile } from '../profile/types';
+import { entryKey, Profile } from '../profile/types';
 import { METRIC_LABELS } from './ProfileResultsTable';
 import { CompareBar } from './charts';
 
@@ -55,7 +55,7 @@ export default function Suggestions({
     save({
       ...current,
       extraEntries: [
-        ...current.extraEntries.filter((e) => !additions.some((a) => a.token === e.token)),
+        ...current.extraEntries.filter((e) => !additions.some((a) => entryKey(a) === entryKey(e))),
         ...additions,
       ],
     });
@@ -64,7 +64,7 @@ export default function Suggestions({
   const useSuggestedOrder = () => {
     save({
       extraEntries: saved?.extraEntries ?? [],
-      rankOrder: ranks.map((r) => r.entry.token),
+      rankOrder: ranks.map((r) => entryKey(r.entry)),
     });
   };
 
