@@ -10,6 +10,7 @@ import { PetInfo } from 'parser/core/Pet';
 import { PlayerDetails, PlayerInfo } from 'parser/core/Player';
 import { WCLReport } from 'parser/core/Report';
 
+import GameBranch from 'game/GameBranch';
 import SPECS from 'game/SPECS';
 
 import { wclQuery } from './graphql';
@@ -474,7 +475,15 @@ const ROLE_OF: Record<keyof V2PlayerDetailsByRole, PlayerDetails['role']> = {
  * A fight's players with their roles and specs, in the shape of WoWAnalyzer's
  * `v2/report/:code/fight/:id/players` endpoint (which v1 mode uses).
  */
-export async function fetchPlayerDetails(code: string, fightId: number): Promise<PlayerDetails[]> {
+/**
+ * `branch` picks between specs that share WCL's class and spec names: Classic's Assassination
+ * Rogue (182) sorts before retail's (259), and a retail log matched to it gets no analysis.
+ */
+export async function fetchPlayerDetails(
+  code: string,
+  fightId: number,
+  branch: GameBranch,
+): Promise<PlayerDetails[]> {
   const data = await wclQuery<{
     reportData: {
       report: {
@@ -492,7 +501,7 @@ export async function fetchPlayerDetails(code: string, fightId: number): Promise
     (byRole[group] ?? []).map((player) => {
       const specName = player.specs?.[0]?.spec;
       const spec = Object.values(SPECS).find(
-        (s) => s.wclClassName === player.type && s.wclSpecName === specName,
+        (s) => s.wclClassName === player.type && s.wclSpecName === specName && s.branch === branch,
       );
       return {
         id: player.id,

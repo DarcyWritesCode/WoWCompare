@@ -458,7 +458,7 @@ class Store {
   }
 }
 
-const stats = { published: 0, parsed: 0, reused: 0, failedLogs: 0, failedBosses: 0 };
+const stats = { published: 0, parsed: 0, reused: 0, empty: 0, failedLogs: 0, failedBosses: 0 };
 
 const specName = (config: Config) => `${config.spec.wclSpecName} ${config.spec.wclClassName}`;
 
@@ -604,6 +604,9 @@ async function snapshotOf(
     if (snapshot) {
       cache?.set(cacheKey, snapshot);
       stats.parsed += 1;
+    } else {
+      // Parsed, but the spec's analysis gave nothing (e.g. no profile metrics for it).
+      stats.empty += 1;
     }
     return snapshot;
   } catch (err) {
@@ -776,7 +779,7 @@ async function collect(
     const fingerprint = profileFingerprint(published.profile);
     const rows: EffectRow[] = [];
     try {
-      for (const difficulty of difficulties) {
+      collecting: for (const difficulty of difficulties) {
         for (const encounter of encounters) {
           const { pool, totalParses } = await budget.retry(() =>
             fetchRankingsPool(
@@ -803,14 +806,21 @@ async function collect(
               picks.push(nearest);
             }
           }
+          let snapshots = 0;
           await eachLimit(picks, Number(args.concurrency), async (parse) => {
             const snapshot = await snapshotOf(config, fingerprint, parse, null, budget);
             if (snapshot) {
+              snapshots += 1;
               rows.push(
                 ...effectRows(logKey({ ...parse, playerName: parse.name }), snapshot, Date.now()),
               );
             }
           });
+          // A spec whose logs all come back empty would otherwise be first in every run.
+          if (picks.length > 0 && snapshots === 0 && rows.length === 0) {
+            say(`${specName(config)}: no snapshots from ${picks.length} logs; skipped`);
+            break collecting;
+          }
         }
       }
     } finally {
@@ -921,7 +931,9 @@ async function main() {
         throw err;
       }
     }
-    say(`Collected. Logs parsed ${stats.parsed}, failed ${stats.failedLogs}.`);
+    say(
+      `Collected. Logs parsed ${stats.parsed}, empty ${stats.empty}, failed ${stats.failedLogs}.`,
+    );
     return 0;
   }
 
@@ -952,7 +964,7 @@ async function main() {
   }
 
   say(
-    `Done. Published ${stats.published}; logs parsed ${stats.parsed}, reused ${stats.reused}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
+    `Done. Published ${stats.published}; logs parsed ${stats.parsed}, reused ${stats.reused}, empty ${stats.empty}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
   );
   // Fail the workflow only when nothing worked, so one bad log or boss doesn't page anyone. A day
   // with nothing due is fine.

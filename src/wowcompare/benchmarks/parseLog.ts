@@ -1,6 +1,8 @@
 import { fetchFights, USE_WCL_V2 } from 'common/fetchWclApi';
 import makeApiUrl from 'common/makeApiUrl';
 import { fetchPlayerDetails } from 'common/wclV2/adapter';
+import GameBranch from 'game/GameBranch';
+import { wclGameVersionToBranch } from 'game/VERSIONS';
 import { getAccessToken } from 'common/wclV2/auth';
 import { fetchPlayerEvents } from 'interface/report/hooks/useEvents';
 import Config from 'parser/Config';
@@ -32,9 +34,13 @@ const cache = new Map<string, Promise<LogSnapshot | null>>();
 const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** The fight's players with their roles, from WCL directly in v2 mode, else WoWAnalyzer's API. */
-async function fetchPlayers(reportCode: string, fightId: number): Promise<PlayerDetails[]> {
+async function fetchPlayers(
+  reportCode: string,
+  fightId: number,
+  branch: GameBranch,
+): Promise<PlayerDetails[]> {
   if (USE_WCL_V2) {
-    return fetchPlayerDetails(reportCode, fightId);
+    return fetchPlayerDetails(reportCode, fightId, branch);
   }
   const response = await fetch(makeApiUrl(`v2/report/${reportCode}/fight/${fightId}/players`));
   if (!response.ok) {
@@ -55,7 +61,11 @@ export async function parseLogSnapshot(config: Config, ref: LogRef): Promise<Log
     throw new Error(`Fight ${ref.fightId} not found in ${ref.reportCode}`);
   }
 
-  const players = await fetchPlayers(ref.reportCode, ref.fightId);
+  const players = await fetchPlayers(
+    ref.reportCode,
+    ref.fightId,
+    wclGameVersionToBranch(report.gameVersion),
+  );
   const named = players.filter((p) => p.name === ref.playerName);
   const player = named.find((p) => p.server === ref.serverName) ?? named[0];
   if (!player) {
