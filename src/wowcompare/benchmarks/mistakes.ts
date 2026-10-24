@@ -326,7 +326,9 @@ function overlapShare(set: CooldownWindowSet, buff: string): number | null {
  * Tiger's Fury during Berserk), valued with the spec's measured buff effects (see
  * buffEffects.ts): the window strength the buff adds x the player's average DPS x window length,
  * for the share of each window it was missing. Only the APL's cooldowns, which players line up on
- * purpose: a proc or passive buff being up reflects how the window went, not a choice.
+ * purpose: a proc or passive buff being up reflects how the window went, not a choice. A pair of
+ * cooldowns has one effect (see buffEffects.ts), so each pair is reported once, from the side
+ * where the gap costs most.
  */
 function buffOverlapMistakes(
   profile: Profile,
@@ -341,7 +343,7 @@ function buffOverlapMistakes(
   const cooldowns = new Set(
     profile.entries.filter((e) => e.kind === 'cooldown').map((e) => e.token),
   );
-  return player.windows.flatMap((set) => {
+  const mistakes = player.windows.flatMap((set) => {
     const cooldown = set.label ?? cooldownName(player, set);
     return effects.effects.flatMap((candidate): Mistake[] => {
       if (candidate.cooldown !== set.token || !cooldowns.has(candidate.buff)) {
@@ -374,6 +376,14 @@ function buffOverlapMistakes(
       ];
     });
   });
+  const byPair = new Map<string, Mistake>();
+  for (const m of mistakes) {
+    const pair = m.key.split('-').slice(1).sort().join('-');
+    if (m.dps > (byPair.get(pair)?.dps ?? -Infinity)) {
+      byPair.set(pair, m);
+    }
+  }
+  return [...byPair.values()];
 }
 
 /**

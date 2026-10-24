@@ -56,8 +56,12 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
   Sindragosa. So an effect is only used when at least 20 logs have the buff clearly up (75%+ of a
   window) in one window and clearly not (25% or less) in another (Icy Talons is up 96–100% of
   every Pillar), and when the fit with only resources as controls agrees in sign and within 3x;
-  the smaller of the two is used (Pillar in Breath: +0.83 vs +0.05, dropped; Breath in Pillar:
-  +0.37 vs +0.81, used at +0.37).
+  the smaller of the two is used.
+- **Cooldown pairs.** Two cooldowns overlapping is measured once, from both cooldowns' windows:
+  either side gives the damage per second of overlap. Pillar's 15s rarely covers 75%+ or 25%- of
+  a 27s Breath, so that side alone had 3 usable logs and swung from +0.83 to +0.05 with the
+  controls; pooled it's +0.45 (+0.76 resources only) from 421. Order within a pair (Tiger's Fury
+  just before Convoke) isn't modelled; the overlap share already covers most of it.
 - **Data.** Any one boss's reference logs are far too few (no strategy was usable at 15 logs), so
   effects pool every boss and difficulty of a spec, over the most recent 3,000 logs within 28 days
   (`EFFECT_LOGS_PER_SPEC`), and need 200 logs per cooldown. Scheduled builds add their logs, and

@@ -15,6 +15,11 @@ import { LogSnapshot } from '../metrics/results';
  * fit extrapolates that to absurd effects; and an effect that changes a lot with the controls
  * (Pillar of Frost in Breath of Sindragosa: +0.83 with every buff, +0.05 with resources only) is
  * driven by what's controlled for, not measured.
+ *
+ * Two cooldowns overlapping is one thing measured from either side: the damage per second of
+ * overlap, which comes out in the same units from both windows. So a pair of cooldowns is fit once,
+ * from both cooldowns' windows (Pillar of Frost's 15s rarely covers 75%+ or 25%- of a 27s Breath
+ * of Sindragosa, so that side alone had 3 usable logs; pooled, 421).
  */
 
 /** One cooldown window, reduced to what the fit needs. */
@@ -150,8 +155,8 @@ function seeded(seed: number) {
   };
 }
 
-/** Effects for one cooldown's windows. */
-function fitCooldown(cooldown: string, rows: EffectRow[]): BuffEffect[] {
+/** Effects for one cooldown's windows (only `only`'s, when given). */
+function fitCooldown(cooldown: string, rows: EffectRow[], only?: string): BuffEffect[] {
   const counts = new Map<string, number>();
   rows.forEach((row) =>
     Object.keys(row.overlap).forEach((b) => counts.set(b, (counts.get(b) ?? 0) + 1)),
@@ -162,7 +167,7 @@ function fitCooldown(cooldown: string, rows: EffectRow[]): BuffEffect[] {
     .sort();
   const resources = [...new Set(rows.flatMap((row) => Object.keys(row.resources)))].sort();
   const p = buffs.length + resources.length;
-  if (buffs.length === 0) {
+  if (buffs.length === 0 || (only && !buffs.includes(only))) {
     return [];
   }
   const features = (row: EffectRow) => [
@@ -244,24 +249,65 @@ function fitCooldown(cooldown: string, rows: EffectRow[]): BuffEffect[] {
   const resamples = Array.from({ length: BOOTSTRAP_ROUNDS }, () =>
     totals(Array.from(perLog, () => perLog[Math.floor(random() * perLog.length)])),
   );
-  return buffs.map((buff, j) => {
+  return buffs.flatMap((buff, j) => {
+    if (only && buff !== only) {
+      return [];
+    }
     const samples = resamples.map((logs) => fit(logs, j)).sort((a, b) => a - b);
-    return {
-      cooldown,
-      buff,
-      effect: fit(all, j),
-      low: percentile(samples, 5),
-      high: percentile(samples, 95),
-      resourcesOnly: fit(all, j, resourceFeatures),
-      logs: perLog.filter((l) => l.contrast[j]).length,
-      windows: counts.get(buff) ?? 0,
-    };
+    return [
+      {
+        cooldown,
+        buff,
+        effect: fit(all, j),
+        low: percentile(samples, 5),
+        high: percentile(samples, 95),
+        resourcesOnly: fit(all, j, resourceFeatures),
+        logs: perLog.filter((l) => l.contrast[j]).length,
+        windows: counts.get(buff) ?? 0,
+      },
+    ];
   });
+}
+
+const PAIR = '(pair)';
+
+/** Cooldowns `a` and `b` overlapping, from both one's and the other's windows. */
+function fitPair(a: string, b: string, aRows: EffectRow[], bRows: EffectRow[]) {
+  const rows = [...aRows, ...bRows].map((row): EffectRow => {
+    const other = row.overlap[row.cooldown === a ? b : a];
+    const overlap = Object.fromEntries(
+      Object.entries(row.overlap).filter(([buff]) => buff !== a && buff !== b),
+    );
+    if (other) {
+      overlap[PAIR] = other;
+    }
+    // Each side's windows compared among themselves.
+    return { ...row, log: `${row.log}:${row.cooldown}`, overlap };
+  });
+  return fitCooldown(PAIR, rows, PAIR)[0];
 }
 
 export function fitBuffEffects(rows: EffectRow[]): BuffEffect[] {
   const byCooldown = groupBy(rows, (row) => row.cooldown);
-  return [...byCooldown].flatMap(([cooldown, cooldownRows]) => fitCooldown(cooldown, cooldownRows));
+  const cooldowns = [...byCooldown.keys()].sort();
+  const isPair = (e: BuffEffect) => e.cooldown !== e.buff && byCooldown.has(e.buff);
+  const pairs = cooldowns.flatMap((a, i) =>
+    cooldowns.slice(i + 1).flatMap((b) => {
+      const pair = fitPair(a, b, byCooldown.get(a)!, byCooldown.get(b)!);
+      return pair
+        ? [
+            { ...pair, cooldown: a, buff: b },
+            { ...pair, cooldown: b, buff: a },
+          ]
+        : [];
+    }),
+  );
+  return [
+    ...[...byCooldown].flatMap(([cooldown, cooldownRows]) =>
+      fitCooldown(cooldown, cooldownRows).filter((e) => !isPair(e)),
+    ),
+    ...pairs,
+  ];
 }
 
 /** An effect is only used once this many logs had the buff clearly on and clearly off. */
