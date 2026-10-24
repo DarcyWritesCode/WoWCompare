@@ -165,6 +165,11 @@ export interface WindowEntryState {
   resources: Record<string, number>;
   /** Self-applied buffs already up, by name token. */
   buffs: Record<string, { name: string; spellId: number; stacks: number }>;
+  /**
+   * Share of the window each buff on the player was up (any source, e.g. Bloodlust), by name
+   * token; only shares of 1% or more. Catches buffs pressed just after the cooldown.
+   */
+  overlap?: Record<string, number>;
 }
 
 export interface CooldownWindowSet {

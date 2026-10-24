@@ -1,6 +1,7 @@
 import { LogSnapshot } from '../metrics/results';
 import { Profile } from '../profile/types';
 import type { RankedParse } from './rankings';
+import type { BuffEffects } from './buffEffects';
 import type { ReferenceBand } from './reference';
 
 /**
@@ -96,6 +97,7 @@ export const bundleKey = (specId: number, encounterId: number, difficulty: numbe
   `bench-${specId}-${encounterId}-${difficulty}`;
 
 export const STATUS_KEY = 'status';
+export const effectsKey = (specId: number) => `effects-${specId}`;
 
 export const logKey = (ref: { reportCode: string; fightId: number; playerName: string }) =>
   `${ref.reportCode}:${ref.fightId}:${ref.playerName}`;
@@ -165,3 +167,6 @@ export async function fetchBenchmarkStatus(): Promise<BenchmarkStatus | null> {
   const status = await getJson<BenchmarkStatus>(STATUS_KEY);
   return isCurrentStatus(status) ? status : null;
 }
+
+/** The spec's measured buff effects, or null if none are published. */
+export const fetchBuffEffects = (specId: number) => getJson<BuffEffects>(`effects/${specId}`);

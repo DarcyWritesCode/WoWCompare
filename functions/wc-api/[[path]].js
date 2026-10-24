@@ -6,6 +6,7 @@ const ROUTES = [
   { pattern: /^profiles\/(\d+)$/, key: (m) => `profile-${m[1]}` },
   { pattern: /^benchmarks\/(\d+)\/(\d+)\/(\d+)$/, key: (m) => `bench-${m[1]}-${m[2]}-${m[3]}` },
   { pattern: /^status$/, key: () => 'status' },
+  { pattern: /^effects\/(\d+)$/, key: (m) => `effects-${m[1]}` },
 ];
 /** Each entry changes at most daily (most weekly); let the edge and browsers reuse answers. */
 const CACHE_SECONDS = 3600;

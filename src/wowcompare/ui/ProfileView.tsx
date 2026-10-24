@@ -8,7 +8,6 @@ import { AUGMENTATION_MIN_UPTIME, POWER_INFUSION_MIN_UPTIME } from '../benchmark
 import { CLOSE_COUNT } from '../benchmarks/select';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
-import { classSpellMatcher } from '../simc/specs';
 import AplExpectations from './AplExpectations';
 import BenchmarkLogList from './BenchmarkLogList';
 import BenchmarkTable from './BenchmarkTable';
@@ -274,6 +273,7 @@ export default function ProfileView({
     loaded,
     available,
     poolSize,
+    effects,
     columns,
     logs,
     reference,
@@ -296,9 +296,9 @@ export default function ProfileView({
   const mistakes = useMemo(
     () =>
       reference && mistakesReady
-        ? biggestMistakes(profile, snapshot, reference.logs, classSpellMatcher(profile.specId))
+        ? biggestMistakes(profile, snapshot, reference.logs, effects)
         : null,
-    [profile, snapshot, reference, mistakesReady],
+    [profile, snapshot, reference, mistakesReady, effects],
   );
 
   const moreButtons = available.length > 0 && (

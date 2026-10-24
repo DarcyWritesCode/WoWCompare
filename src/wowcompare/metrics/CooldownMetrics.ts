@@ -8,7 +8,7 @@ import { getProfile } from '../profile/registry';
 import { Profile, ProfileEntry } from '../profile/types';
 import DamageTimeline from './DamageTimeline';
 import SpellCatalog from './SpellCatalog';
-import { contains, Interval, mergeIntervals, windowThroughput } from './intervals';
+import { contains, Interval, mergeIntervals, totalDuration, windowThroughput } from './intervals';
 import {
   CooldownWindow,
   CooldownWindowSet,
@@ -28,6 +28,8 @@ const MIN_ABILITY_SHARE = 0.03;
 const MAX_ABILITIES = 8;
 /** How far a window's start may be from the cast that opened it. */
 const ENTRY_CAST_TOLERANCE_MS = 300;
+/** Buffs up for less of a window than this aren't recorded in its overlap. */
+const MIN_OVERLAP = 0.01;
 
 export interface CooldownUsage {
   casts: number;
@@ -163,7 +165,7 @@ class CooldownMetrics extends Analyzer {
           label: entry.label,
           windows: windows.map((window) => this.timeline(window)),
           abilities: this.abilityBreakdown(windows),
-          entryStates: windows.map((window) => this.entryState(window.start, resolved.casts)),
+          entryStates: windows.map((window) => this.entryState(window, resolved.casts)),
         },
       ];
     });
@@ -173,7 +175,7 @@ class CooldownMetrics extends Analyzer {
    * Resources and self-applied buffs as a window opens: what the player pooled and lined up.
    * Buffs applied at the opening instant (the cooldown's own) don't count as lined up.
    */
-  private entryState(start: number, castTimes: number[]): WindowEntryState {
+  private entryState({ start, end }: Interval, castTimes: number[]): WindowEntryState {
     const castAt = castTimes.find((t) => Math.abs(t - start) <= ENTRY_CAST_TOLERANCE_MS) ?? start;
     const cast = this.damageTimeline.casts.find(
       (c) => c.timestamp === castAt && c.resources !== undefined,
@@ -206,7 +208,28 @@ class CooldownMetrics extends Analyzer {
         stacks: Math.max(1, stacks),
       };
     }
-    return { resources, buffs };
+    return { resources, buffs, overlap: this.buffOverlap(start, end) };
+  }
+
+  /** Share of `start`–`end` each buff on the player was up, by name token (1% or more). */
+  private buffOverlap(start: number, end: number): Record<string, number> {
+    const byToken = new Map<string, Interval[]>();
+    for (const buff of this.selectedCombatant.buffs) {
+      const from = Math.max(start, buff.start);
+      const to = Math.min(end, buff.end ?? end);
+      if (to > from) {
+        const token = simcToken(buff.ability.name);
+        byToken.set(token, [...(byToken.get(token) ?? []), { start: from, end: to }]);
+      }
+    }
+    const overlap: Record<string, number> = {};
+    for (const [token, intervals] of byToken) {
+      const share = totalDuration(mergeIntervals(intervals, start, end)) / (end - start);
+      if (share >= MIN_OVERLAP) {
+        overlap[token] = Math.round(share * 100) / 100;
+      }
+    }
+    return overlap;
   }
 
   /** The biggest damage abilities inside the windows, grouped by name across spell IDs. */

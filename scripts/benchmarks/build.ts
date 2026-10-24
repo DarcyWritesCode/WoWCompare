@@ -28,6 +28,7 @@ import {
   BenchmarkStatus,
   BundleStatus,
   bundleKey,
+  effectsKey,
   isCurrentStatus,
   logKey,
   profileFingerprint,
@@ -39,6 +40,12 @@ import {
   STATUS_VERSION,
 } from 'wowcompare/benchmarks/published';
 import { fetchRankingsPool, RankedParse } from 'wowcompare/benchmarks/rankings';
+import {
+  BuffEffects,
+  EffectRow,
+  effectRows,
+  fitBuffEffects,
+} from 'wowcompare/benchmarks/buffEffects';
 import { isExternallyBuffed, selectReference } from 'wowcompare/benchmarks/reference';
 import { slotAt, slotTimeUtc, STALE_AFTER_MS, WEEKDAY_NAMES } from 'wowcompare/benchmarks/schedule';
 import { BENCHMARK_CONFIGS, SPEC_SLOTS } from 'wowcompare/benchmarks/specs';
@@ -56,6 +63,16 @@ const LOG_TIMEOUT_MS = 120_000;
  * than go stale forever.
  */
 const KV_TTL_SECONDS = 21 * 24 * 60 * 60;
+/**
+ * Bump when snapshots gain data the job itself uses (e.g. window overlap for buff effects), so
+ * cached logs are parsed again without invalidating published data (`SNAPSHOT_VERSION`).
+ */
+const CACHE_VERSION = 2;
+/** Buff effects use at most this many of a spec's most recent logs, collected in this period. */
+const EFFECT_LOGS_PER_SPEC = 3000;
+const EFFECT_ROW_MAX_AGE_MS = 28 * 24 * 60 * 60 * 1000;
+/** New logs a collector run parses per spec, boss and difficulty before moving on. */
+const COLLECT_PER_BOSS = 8;
 /** Parsed logs not reused for this long are dropped from the job's own cache (a week + slack). */
 const CACHE_PRUNE_AFTER_MS = 9 * 24 * 60 * 60 * 1000;
 /**
@@ -90,6 +107,8 @@ const { values: args } = parseArgs({
      * they're stale, e.g. to choose the order of a first release.
      */
     first: { type: 'string', multiple: true, default: [] },
+    /** Collector mode: parse extra logs for buff effects only (see `collect`). */
+    collect: { type: 'boolean', default: false },
     /** Every spec, whatever the schedule says (after any `--spec` ones). */
     all: { type: 'boolean', default: false },
     /** These encounter IDs instead of the current raid (required in v1 mode). */
@@ -551,7 +570,8 @@ async function snapshotOf(
   config: Config,
   fingerprint: string,
   parse: RankedParse,
-  cache: SnapshotCache,
+  /** Null for logs only collected for buff effects: snapshots are large, and these aren't reused. */
+  cache: SnapshotCache | null,
   budget: RateBudget,
 ): Promise<LogSnapshot | null> {
   const ref = {
@@ -560,8 +580,8 @@ async function snapshotOf(
     playerName: parse.name,
     serverName: parse.serverName,
   };
-  const cacheKey = `v${SNAPSHOT_VERSION}:${fingerprint}:${logKey(ref)}`;
-  const cached = cache.get(cacheKey);
+  const cacheKey = `v${SNAPSHOT_VERSION}.${CACHE_VERSION}:${fingerprint}:${logKey(ref)}`;
+  const cached = cache?.get(cacheKey);
   if (cached) {
     stats.reused += 1;
     return cached;
@@ -571,7 +591,7 @@ async function snapshotOf(
       withTimeout(parseLogSnapshot(config, ref), LOG_TIMEOUT_MS, logKey(ref)),
     );
     if (snapshot) {
-      cache.set(cacheKey, snapshot);
+      cache?.set(cacheKey, snapshot);
       stats.parsed += 1;
     }
     return snapshot;
@@ -594,6 +614,8 @@ async function publishBundle(
   store: Store,
   cache: SnapshotCache,
   budget: RateBudget,
+  /** Receives every parsed log's windows, for buff effects. */
+  rows: EffectRow[],
 ): Promise<BundleStatus | null> {
   const { spec } = config;
   const rankings = await budget.retry(() =>
@@ -625,7 +647,9 @@ async function publishBundle(
   await eachLimit(parses, Number(args.concurrency), async (parse) => {
     const snapshot = await snapshotOf(config, bundle.profileFingerprint, parse, cache, budget);
     if (snapshot) {
-      bundle.snapshots[logKey({ ...parse, playerName: parse.name })] = snapshot;
+      const key = logKey({ ...parse, playerName: parse.name });
+      bundle.snapshots[key] = snapshot;
+      rows.push(...effectRows(key, snapshot, Date.now()));
     } else if (candidates.includes(parse)) {
       failed += 1;
     }
@@ -650,6 +674,128 @@ async function publishBundle(
   };
 }
 
+/**
+ * Every parsed log's cooldown windows, per spec, kept between runs (with the snapshot cache) to
+ * estimate buff effects from far more logs than one run parses. Only the most recent
+ * `EFFECT_LOGS_PER_SPEC` logs within `EFFECT_ROW_MAX_AGE_MS` are kept, so effects follow patches.
+ */
+class EffectStore {
+  private readonly dir = path.join(cacheDir, 'effects');
+
+  constructor() {
+    fs.mkdirSync(this.dir, { recursive: true });
+  }
+
+  private file(specId: number) {
+    return path.join(this.dir, `${specId}.jsonl`);
+  }
+
+  load(specId: number): EffectRow[] {
+    const file = this.file(specId);
+    return fs.existsSync(file)
+      ? fs
+          .readFileSync(file, 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as EffectRow)
+      : [];
+  }
+
+  logs(specId: number): Set<string> {
+    return new Set(this.load(specId).map((row) => row.log));
+  }
+
+  /** Adds `fresh` (replacing earlier rows of the same logs), trims, saves; returns all rows. */
+  add(specId: number, fresh: EffectRow[]): EffectRow[] {
+    const freshLogs = new Set(fresh.map((row) => row.log));
+    const rows = [...this.load(specId).filter((row) => !freshLogs.has(row.log)), ...fresh].filter(
+      (row) => Date.now() - row.at < EFFECT_ROW_MAX_AGE_MS,
+    );
+    const newest = new Map<string, number>();
+    rows.forEach((row) => newest.set(row.log, Math.max(newest.get(row.log) ?? 0, row.at)));
+    const keep = new Set(
+      [...newest]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, EFFECT_LOGS_PER_SPEC)
+        .map(([log]) => log),
+    );
+    const kept = rows.filter((row) => keep.has(row.log));
+    fs.writeFileSync(this.file(specId), kept.map((row) => JSON.stringify(row)).join('\n'));
+    return kept;
+  }
+}
+
+async function publishEffects(config: Config, rows: EffectRow[], store: Store) {
+  if (rows.length === 0) {
+    return;
+  }
+  const effects: BuffEffects = {
+    specId: config.spec.id,
+    builtAt: Date.now(),
+    logs: new Set(rows.map((row) => row.log)).size,
+    effects: fitBuffEffects(rows),
+  };
+  await store.put(effectsKey(config.spec.id), effects);
+  say(`${specName(config)}: buff effects from ${effects.logs} logs`);
+}
+
+/**
+ * Collector mode (`--collect`, the idle hours between scheduled builds): parses extra logs from
+ * the rankings around the reference band, only for buff effects, spending WCL points the
+ * schedule leaves unused. Specs with the fewest collected logs go first; each gets up to
+ * `COLLECT_PER_BOSS` new logs per boss and difficulty, then its effects are refitted.
+ */
+async function collect(
+  encounters: Encounter[],
+  difficulties: number[],
+  store: Store,
+  budget: RateBudget,
+  effects: EffectStore,
+) {
+  const specs = BENCHMARK_CONFIGS.map((config) => ({
+    config,
+    collected: effects.logs(config.spec.id),
+  })).sort((a, b) => a.collected.size - b.collected.size);
+  for (const { config, collected } of specs) {
+    const published = await store.get<PublishedProfile>(profileKey(config.spec.id));
+    if (published?.snapshotVersion !== SNAPSHOT_VERSION) {
+      continue; // not built yet; its scheduled slot comes first
+    }
+    setProfile(config.spec.id, published.profile);
+    const fingerprint = profileFingerprint(published.profile);
+    const rows: EffectRow[] = [];
+    try {
+      for (const difficulty of difficulties) {
+        for (const encounter of encounters) {
+          const { pool } = await budget.retry(() =>
+            fetchRankingsPool({
+              encounterId: encounter.id,
+              difficulty,
+              className: config.spec.wclClassName,
+              specName: config.spec.wclSpecName,
+              metric: config.spec.role === ROLES.HEALER ? 'hps' : 'dps',
+            }),
+          );
+          const fresh = pool.filter((p) => !collected.has(logKey({ ...p, playerName: p.name })));
+          // Spread over the pool rather than its top.
+          const step = Math.max(1, Math.floor(fresh.length / COLLECT_PER_BOSS));
+          const picks = fresh.filter((_, i) => i % step === 0).slice(0, COLLECT_PER_BOSS);
+          await eachLimit(picks, Number(args.concurrency), async (parse) => {
+            const snapshot = await snapshotOf(config, fingerprint, parse, null, budget);
+            if (snapshot) {
+              rows.push(
+                ...effectRows(logKey({ ...parse, playerName: parse.name }), snapshot, Date.now()),
+              );
+            }
+          });
+        }
+      }
+    } finally {
+      await publishEffects(config, effects.add(config.spec.id, rows), store);
+    }
+  }
+}
+
 /** Rebuilds one spec: its profile, then every boss and difficulty, updating `status` as it goes. */
 async function buildSpec(
   config: Config,
@@ -659,8 +805,10 @@ async function buildSpec(
   store: Store,
   cache: SnapshotCache,
   budget: RateBudget,
+  effects: EffectStore,
 ) {
   const published = await publishProfile(config, store);
+  const rows: EffectRow[] = [];
   const previous = status.specs[config.spec.id];
   const entry: SpecStatus = {
     specId: config.spec.id,
@@ -672,37 +820,43 @@ async function buildSpec(
   };
   status.specs[config.spec.id] = entry;
   let failures = 0;
-  for (const difficulty of difficulties) {
-    for (const encounter of encounters) {
-      const label = `${specName(config)}, ${encounter.name ?? encounter.id}, difficulty ${difficulty}`;
-      try {
-        const bundle = await publishBundle(
-          config,
-          published,
-          encounter,
-          difficulty,
-          store,
-          cache,
-          budget,
-        );
-        if (bundle) {
-          entry.bundles = [
-            ...entry.bundles.filter(
-              (b) => b.encounterId !== encounter.id || b.difficulty !== difficulty,
-            ),
-            bundle,
-          ];
+  try {
+    for (const difficulty of difficulties) {
+      for (const encounter of encounters) {
+        const label = `${specName(config)}, ${encounter.name ?? encounter.id}, difficulty ${difficulty}`;
+        try {
+          const bundle = await publishBundle(
+            config,
+            published,
+            encounter,
+            difficulty,
+            store,
+            cache,
+            budget,
+            rows,
+          );
+          if (bundle) {
+            entry.bundles = [
+              ...entry.bundles.filter(
+                (b) => b.encounterId !== encounter.id || b.difficulty !== difficulty,
+              ),
+              bundle,
+            ];
+          }
+          say(label);
+        } catch (err) {
+          if (err instanceof OutOfTime) {
+            throw err;
+          }
+          stats.failedBosses += 1;
+          failures += 1;
+          say(`${label}: ${(err as Error).message}`);
         }
-        say(label);
-      } catch (err) {
-        if (err instanceof OutOfTime) {
-          throw err;
-        }
-        stats.failedBosses += 1;
-        failures += 1;
-        say(`${label}: ${(err as Error).message}`);
       }
     }
+  } finally {
+    // Even when cut short: the logs parsed so far still count towards buff effects.
+    await publishEffects(config, effects.add(config.spec.id, rows), store);
   }
   // Bosses no longer in the current raid drop out of the summary.
   entry.bundles = entry.bundles.filter((b) => encounters.some((e) => e.id === b.encounterId));
@@ -729,18 +883,32 @@ async function main() {
     await store.put(STATUS_KEY, status);
   };
 
-  const specs = specsToBuild(status);
   const encounters: Encounter[] =
     args.encounter.length > 0
       ? args.encounter.map((id) => ({ id: Number(id), name: null }))
       : await currentRaidEncounters();
   const difficulties = args.difficulty.length > 0 ? args.difficulty.map(Number) : DIFFICULTIES;
+  const effects = new EffectStore();
+
+  if (args.collect) {
+    try {
+      await collect(encounters, difficulties, store, budget, effects);
+    } catch (err) {
+      if (!(err instanceof OutOfTime)) {
+        throw err;
+      }
+    }
+    say(`Collected. Logs parsed ${stats.parsed}, failed ${stats.failedLogs}.`);
+    return 0;
+  }
+
+  const specs = specsToBuild(status);
   say(`${specs.length} specs × ${encounters.length} bosses × ${difficulties.length} difficulties`);
 
   try {
     for (const config of specs) {
       try {
-        await buildSpec(config, encounters, difficulties, status, store, cache, budget);
+        await buildSpec(config, encounters, difficulties, status, store, cache, budget, effects);
       } catch (err) {
         if (err instanceof OutOfTime) {
           throw err;

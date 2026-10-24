@@ -1,6 +1,7 @@
 import { CooldownWindowSet, entryResult, LogSnapshot, WindowEntryState } from '../metrics/results';
 import { Profile, ProfileEntry, SpellRef } from '../profile/types';
 import { median } from './aggregate';
+import { BuffEffects, significantEffect } from './buffEffects';
 
 /** Gaps worth less than this share of the player's DPS aren't listed. */
 const MIN_SHARE = 0.003;
@@ -229,10 +230,8 @@ function entryMistakes(profile: Profile, player: LogSnapshot, topLogs: LogSnapsh
 
 /** How much more pooled (as a share of the resource's max) before it's worth flagging. */
 const MIN_POOL_GAP = 0.1;
-/** How much more often a buff must be lined up in top logs before it's worth flagging. */
+/** How much more of each window a buff must be up in reference logs before it's worth flagging. */
 const MIN_LINEUP_GAP = 0.25;
-/** Fewer windows than this and the with/without comparison is noise. */
-const MIN_SAMPLES = 6;
 /** Very short windows have spiky DPS that swamps the comparison. */
 const MIN_SAMPLE_MS = 3_000;
 
@@ -260,21 +259,14 @@ function samples(log: LogSnapshot, token: string): WindowSample[] {
 }
 
 /**
- * What the player brings into each cooldown vs the top logs: resources pooled and class buffs
- * lined up. Pooling is valued as the extra points x the player's damage per point x the window's
- * extra multiplier; a buff by how much higher window DPS is with it up than without (across the
- * player's and the top logs' windows together).
+ * Resources pooled going into each cooldown vs the reference logs, valued as the extra points x
+ * the player's damage per point x the window's extra multiplier.
  */
-function entryStateMistakes(
-  player: LogSnapshot,
-  topLogs: LogSnapshot[],
-  isClassSpell: (spellId: number, token: string) => boolean,
-): Mistake[] {
+function poolingMistakes(player: LogSnapshot, topLogs: LogSnapshot[]): Mistake[] {
   const seconds = player.durationMs / 1000;
   return player.windows.flatMap((set) => {
     const mine = samples(player, set.token);
     const top = topLogs.map((log) => samples(log, set.token)).filter((s) => s.length > 0);
-    const pooled = [...mine, ...top.flat()];
     if (mine.length === 0 || top.length === 0) {
       return [];
     }
@@ -316,58 +308,71 @@ function entryStateMistakes(
       });
     }
 
-    const buffs = new Map<string, { name: string; spellId: number }>();
-    for (const sample of pooled) {
-      for (const [token, buff] of Object.entries(sample.state.buffs)) {
-        if (token !== set.token && isClassSpell(buff.spellId, token) && !buffs.has(token)) {
-          buffs.set(token, buff);
-        }
-      }
-    }
-    for (const [token, buff] of buffs) {
-      const share = (list: WindowSample[]) =>
-        list.filter((s) => s.state.buffs[token]).length / list.length;
-      const myShare = share(mine);
-      const topShare = median(top.map(share)) ?? 0;
-      const withBuff = pooled.filter((s) => s.state.buffs[token]).map((s) => s.value);
-      const without = pooled.filter((s) => !s.state.buffs[token]).map((s) => s.value);
-      if (
-        topShare - myShare < MIN_LINEUP_GAP ||
-        withBuff.length + without.length < MIN_SAMPLES ||
-        withBuff.length < 2 ||
-        without.length < 2
-      ) {
-        continue;
-      }
-      // Window DPS relative to the log's average (so window length doesn't count), medians so
-      // one odd window can't dominate. Capped at what the buff itself is worth: the DPS gain
-      // while it's up vs down over the whole fight (player's, else the top logs' median), applied
-      // to the window's damage.
-      const buffRatio =
-        player.auras.find((a) => a.token === token && a.kind === 'buff')?.dpsRatio ??
-        median(
-          topLogs
-            .map((log) => log.auras.find((a) => a.token === token && a.kind === 'buff')?.dpsRatio)
-            .filter((v): v is number => typeof v === 'number'),
-        );
-      const windowDps = (ratio ?? 1) * player.fightDps;
-      const cap = buffRatio && buffRatio > 1 ? (buffRatio - 1) * windowDps * windowSeconds(set) : 0;
-      const gain = Math.min(
-        (median(withBuff)! - median(without)!) * player.fightDps * windowSeconds(set),
-        cap,
-      );
-      const dps = (gain * (topShare - myShare) * set.windows.length) / seconds;
-      if (dps > 0) {
-        mistakes.push({
-          key: `lineup-${set.token}-${token}`,
-          spellId: buff.spellId,
-          title: `Have ${buff.name} up going into ${cooldown}`,
-          detail: `up for ${pct(myShare)} vs ${pct(topShare)} of casts`,
-          dps,
-        });
-      }
-    }
     return mistakes;
+  });
+}
+
+/** Average share of `set`'s windows that `buff` was up (windows recorded without overlap skipped). */
+function overlapShare(set: CooldownWindowSet, buff: string): number | null {
+  const shares = set.windows.flatMap((window, i) => {
+    const overlap = set.entryStates[i]?.overlap;
+    return overlap && window.durationMs >= MIN_SAMPLE_MS ? [overlap[buff] ?? 0] : [];
+  });
+  return shares.length > 0 ? shares.reduce((sum, v) => sum + v, 0) / shares.length : null;
+}
+
+/**
+ * The APL's other cooldowns kept up during each cooldown less than in the reference logs (e.g.
+ * Tiger's Fury during Berserk), valued with the spec's measured buff effects (see
+ * buffEffects.ts): the window strength the buff adds x the player's average DPS x window length,
+ * for the share of each window it was missing. Only the APL's cooldowns, which players line up on
+ * purpose: a proc or passive buff being up reflects how the window went, not a choice.
+ */
+function buffOverlapMistakes(
+  profile: Profile,
+  player: LogSnapshot,
+  topLogs: LogSnapshot[],
+  effects: BuffEffects | null,
+): Mistake[] {
+  if (!effects) {
+    return [];
+  }
+  const seconds = player.durationMs / 1000;
+  const cooldowns = new Set(
+    profile.entries.filter((e) => e.kind === 'cooldown').map((e) => e.token),
+  );
+  return player.windows.flatMap((set) => {
+    const cooldown = set.label ?? cooldownName(player, set);
+    return effects.effects.flatMap((candidate): Mistake[] => {
+      if (candidate.cooldown !== set.token || !cooldowns.has(candidate.buff)) {
+        return [];
+      }
+      const effect = significantEffect(effects, set.token, candidate.buff);
+      const aura = player.auras.find((a) => a.token === candidate.buff && a.kind === 'buff');
+      if (!effect || effect.effect <= 0 || !aura) {
+        return [];
+      }
+      const mine = overlapShare(set, candidate.buff);
+      const theirs = median(
+        topLogs
+          .map((log) => log.windows.find((s) => s.token === set.token))
+          .map((s) => (s ? overlapShare(s, candidate.buff) : null))
+          .filter((v): v is number => v !== null),
+      );
+      if (mine === null || theirs === null || theirs - mine < MIN_LINEUP_GAP) {
+        return [];
+      }
+      const perWindow = effect.effect * player.fightDps * windowSeconds(set);
+      return [
+        {
+          key: `lineup-${set.token}-${candidate.buff}`,
+          spellId: aura.spellId,
+          title: `Have ${aura.name} up during ${cooldown}`,
+          detail: `up for ${pct(mine)} vs ${pct(theirs)} of each window`,
+          dps: (perWindow * (theirs - mine) * set.windows.length) / seconds,
+        },
+      ];
+    });
   });
 }
 
@@ -380,8 +385,8 @@ export function biggestMistakes(
   profile: Profile,
   player: LogSnapshot,
   topLogs: LogSnapshot[],
-  /** Limits buff line-up checks to class buffs (no flasks, food or trinket procs). */
-  isClassSpell: (spellId: number, token: string) => boolean = () => true,
+  /** The spec's measured buff effects (benchmark job), for cooldown line-up estimates. */
+  effects: BuffEffects | null = null,
 ): Mistake[] {
   if (topLogs.length === 0 || player.durationMs <= 0) {
     return [];
@@ -389,7 +394,8 @@ export function biggestMistakes(
   return [
     ...windowMistakes(player, topLogs),
     ...entryMistakes(profile, player, topLogs),
-    ...entryStateMistakes(player, topLogs, isClassSpell),
+    ...poolingMistakes(player, topLogs),
+    ...buffOverlapMistakes(profile, player, topLogs, effects),
   ]
     .filter((m) => Number.isFinite(m.dps) && m.dps >= player.fightDps * MIN_SHARE)
     .sort((a, b) => b.dps - a.dps)

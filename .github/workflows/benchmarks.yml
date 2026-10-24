@@ -1,14 +1,17 @@
 name: Benchmarks
 
-# Every two hours: rebuilds the one spec whose weekly slot it is (src/wowcompare/benchmarks/
-# schedule.ts), or in a free slot the stalest spec. For every Heroic and Mythic boss of the current raid
-# it parses the #1 and the logs around the 90th percentile and publishes them to Cloudflare KV for
-# Live Compare. See scripts/benchmarks/README.md.
+# Every two hours from 00:47 UTC: rebuilds the one spec whose weekly slot it is
+# (src/wowcompare/benchmarks/schedule.ts), or in a free slot the stalest spec, parsing the #1 and
+# the reference logs (90-95th percentile) for every Heroic and Mythic boss of the current raid.
+# Hourly from 12:17 UTC: collector runs parse extra logs to measure buff effects. Everything is
+# published to Cloudflare KV for Live Compare. See scripts/benchmarks/README.md.
 on:
   schedule:
     # Keep in step with SLOT_HOURS, SLOT_MINUTE and SLOTS_PER_DAY in schedule.ts (shown on the
     # specs page).
     - cron: '47 0-10/2 * * *'
+    # The idle hours: collector runs (`--collect`) parse extra logs for buff effects only.
+    - cron: '17 12-23 * * *'
   workflow_dispatch:
     inputs:
       args:
@@ -53,9 +56,9 @@ jobs:
       - id: run
         run: pnpm run benchmarks:run $ARGS
         env:
-          # Scheduled runs take BENCHMARK_ARGS (a repository variable), e.g. `--first Druid` to
-          # choose the order of a first release.
-          ARGS: ${{ inputs.args || vars.BENCHMARK_ARGS }}
+          # Collector runs get --collect; other scheduled runs take BENCHMARK_ARGS (a repository
+          # variable), e.g. `--first Druid` to choose which stale specs free slots catch up first.
+          ARGS: ${{ inputs.args || (github.event.schedule == '17 12-23 * * *' && '--collect --max-minutes 50') || vars.BENCHMARK_ARGS }}
           WCL_CLIENT_ID: ${{ secrets.WCL_CLIENT_ID }}
           WCL_CLIENT_SECRET: ${{ secrets.WCL_CLIENT_SECRET }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

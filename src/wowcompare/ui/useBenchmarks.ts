@@ -4,7 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { medianResults, rescoreAgainst } from '../benchmarks/aggregate';
 import { parseBenchmarkLog } from '../benchmarks/parseLog';
-import { fetchBenchmarkBundle, logKey, profileFingerprint } from '../benchmarks/published';
+import { BuffEffects } from '../benchmarks/buffEffects';
+import {
+  fetchBenchmarkBundle,
+  fetchBuffEffects,
+  logKey,
+  profileFingerprint,
+} from '../benchmarks/published';
 import { fetchRankingsPool, RankedParse, RankingsQuery } from '../benchmarks/rankings';
 import {
   percentileOfRank,
@@ -186,6 +192,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState<BenchmarkSelection | null>(null);
   const [poolSize, setPoolSize] = useState(0);
+  const [effects, setEffects] = useState<BuffEffects | null>(null);
   /** Parsed logs by `parseKey`; null when parsing failed. */
   const [parsed, setParsed] = useState<Map<string, LogSnapshot | null>>(new Map());
   const [loaded, setLoaded] = useState<BenchmarkKind[]>([]);
@@ -234,6 +241,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
       try {
         setStatus('Fetching rankings…');
         const { config, profile, query } = inputs;
+        fetchBuffEffects(config.spec.id).then(setEffects);
         // The benchmark job's rankings and parsed logs, when it has covered this boss.
         const bundle = await fetchBenchmarkBundle(
           config.spec.id,
@@ -430,6 +438,8 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
       : [],
     /** Ranked parses that same build and close benchmarks are chosen from. */
     poolSize,
+    /** The spec's measured buff effects, for buff line-up estimates. */
+    effects,
     columns: derived?.columns ?? null,
     logs: derived?.logs ?? [],
     reference: derived?.reference ?? null,

@@ -36,6 +36,30 @@ See `src/wowcompare/benchmarks/reference.ts`.
   the player. "Leave out PI/Aug-buffed logs" (on by default) drops logs over the thresholds from
   the median. With fewer than 5 left, it keeps them. About a third of candidates are buffed.
 
+## Buff effects (cooldown line-ups)
+
+"Have Tiger's Fury up during Berserk" estimates need to know how much a buff adds to a cooldown's
+windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
+
+- **Measure.** Each window records the share of it each buff was up (overlap). Up-at-the-cast
+  missed buffs pressed just after the cooldown, e.g. Tiger's Fury after Berserk. On held-out
+  Feral logs, overlap explained 36% of Berserk windows' strength vs 6% for up-at-cast.
+- **Method.** Window strength (window DPS / the log's average) regressed on buff overlaps and
+  resources at the cast, within each log, with every other buff as a control, ridge-regularized.
+  Compared on planted effects of known size in real windows, this was the only strategy that
+  stayed accurate when buffs, resources or Bloodlust and potions coincide; pooling windows
+  across logs (the earlier method) or comparing within logs without controls were off by 0.04 to
+  0.14 window strength. 90% intervals come from resampling logs, and only effects whose interval
+  excludes zero are used.
+- **Data.** Any one boss's reference logs are far too few (no strategy was usable at 15 logs), so
+  effects pool every boss and difficulty of a spec, over the most recent 3,000 logs within 28 days
+  (`EFFECT_LOGS_PER_SPEC`), and need 200 logs per cooldown. Scheduled builds add their logs, and
+  collector runs (`--collect`, hourly 12:17–23:17 UTC, when no build runs) parse more from the
+  rankings around the reference band, specs with the fewest logs first. The rows live in the
+  job's cache (`effects/<specId>.jsonl`); the fit is published as `effects-<specId>`.
+- **What's suggested.** Only the APL's own cooldowns overlapping each other: a proc or passive buff
+  being up during a window reflects how the window went, not a choice.
+
 ## Why this design
 
 - **Read-only to viewers.** An earlier version let browsers upload parsed logs to a shared
@@ -84,14 +108,17 @@ See `src/wowcompare/benchmarks/reference.ts`.
   A spec is about 420 logs. The job checks `rateLimitData` every 15s and pauses every worker for
   the hourly reset before using the last 10%. If WCL still answers 429, it waits for the reset and
   retries. Logs already parsed with the same profile come from `actions/cache` and cost nothing.
+  Collector runs spend the hours builds leave idle, up to the same limit: roughly 6,000 logs a
+  day across all specs.
 - **Time.** Parsing stops at `--max-minutes` (110 by default, so a run ends before the next slot),
   and whatever is left waits for a free slot. A spec only counts as complete when every boss built;
   otherwise it's caught up. Changing what "complete" means (e.g. how reference logs are chosen)
   needs a bump of `STATUS_VERSION` in `published.ts`, which makes every spec due again.
-- **Actions minutes.** The repository is private: 42 runs a week of roughly 5–10 minutes each
-  (setup is ~4), about 1,500 minutes a month.
-- **KV writes.** The free plan allows 1,000 a day. A spec writes one profile, about 20 bundles and
-  the status: at most ~140 a day. Entries expire after 21 days, so a spec that misses two weeks
+- **Actions minutes.** The repository is public, so GitHub-hosted runner minutes are free. The
+  schedule is 42 builds and 84 collector runs a week.
+- **KV writes.** The free plan allows 1,000 a day. A spec writes one profile, about 20 bundles,
+  its buff effects and the status: at most ~150 a day for builds. Collector runs write one
+  effects entry per spec they collect for: about 50 a day. Entries expire after 21 days, so a spec that misses two weeks
   drops out rather than going stale.
 
 ## Running it locally
