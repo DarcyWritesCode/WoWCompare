@@ -8,8 +8,8 @@ import {
   SpecStatus,
 } from '../benchmarks/published';
 import { REFERENCE_LABEL } from '../benchmarks/reference';
-import { nextRun, runTimeUtc, updateDay, WEEKDAY_NAMES } from '../benchmarks/schedule';
-import { hasSimcApl } from '../profile/registry';
+import { nextRun, slotTimeUtc, WEEKDAY_NAMES } from '../benchmarks/schedule';
+import { SPEC_SLOTS } from '../benchmarks/specs';
 
 const DIFFICULTY_NAMES: Record<number, string> = { 3: 'Normal', 4: 'Heroic', 5: 'Mythic' };
 
@@ -98,24 +98,18 @@ function Details({ spec }: { spec: SpecStatus }) {
  * Live Compare's benchmark data for one spec, on the specs page: when it's rebuilt, when it last
  * was, which SimC APL it uses and which logs it compares against.
  */
-export default function LiveCompareStatus({
-  specId,
-  wclClassName,
-}: {
-  specId: number;
-  wclClassName: string;
-}) {
+export default function LiveCompareStatus({ specId }: { specId: number }) {
   const status = useBenchmarkStatus();
   const [open, setOpen] = useState(false);
-  if (!hasSimcApl(specId)) {
+  const slot = SPEC_SLOTS.get(specId);
+  if (!slot) {
     return (
       <div className="text-muted" style={{ fontSize: 'smaller' }}>
         Live Compare: no SimC APL for this spec.
       </div>
     );
   }
-  const day = updateDay(wclClassName);
-  const run = nextRun(day);
+  const run = nextRun(slot);
   const localTime = run.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const localDay = run.toLocaleDateString(undefined, { weekday: 'long' });
   const spec = status?.specs[specId];
@@ -125,8 +119,8 @@ export default function LiveCompareStatus({
 
   return (
     <div style={{ fontSize: 'smaller', marginTop: 4 }}>
-      <div title={`${WEEKDAY_NAMES[day]}s from ${runTimeUtc()}`}>
-        Live Compare: updated <strong>{localDay}s</strong> (from ~{localTime} your time)
+      <div title={`${WEEKDAY_NAMES[slot.day]}s at ${slotTimeUtc(slot.slot)}`}>
+        Live Compare: updated <strong>{localDay}s</strong> (~{localTime} your time)
         {spec && (
           <>
             {' '}

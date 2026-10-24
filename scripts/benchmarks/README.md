@@ -3,9 +3,9 @@
 Live Compare scores a log against the median of 20 parses spread over the **90–95th percentile** for its
 spec, boss and difficulty, and shows the #1 parse as the ceiling. Parsing those logs in the
 viewer's browser is slow, so a GitHub Actions job (`.github/workflows/benchmarks.yml`) does it
-once for everyone. It runs daily and rebuilds each class once a week, on its day in
-`src/wowcompare/benchmarks/schedule.ts`. The specs page (`/specs`) shows that day and what was
-built.
+once for everyone. It runs every two hours (00:47–10:47 UTC) and builds one spec per run: each
+spec has a weekly slot, on its class's day in `src/wowcompare/benchmarks/schedule.ts`. The specs
+page (`/specs`) shows each spec's slot and what was built.
 
 For each spec it rebuilds:
 
@@ -41,9 +41,11 @@ See `src/wowcompare/benchmarks/reference.ts`.
 - **Read-only to viewers.** An earlier version let browsers upload parsed logs to a shared
   cache. Every input to its keys was public, so anyone could plant fake benchmark data that
   everyone would be scored against. Now only this job writes, using an API token.
-- **Weekly, by class.** Each spec's profile and benchmarks are rebuilt together on its class's
-  day, so the profile fingerprint matches its benchmarks all week. Specs not completed within
-  8 days (a failed or cut-short run, or never built) are caught up on any day, oldest first.
+- **One spec per run, weekly.** A spec's profile and benchmarks are rebuilt together in its slot,
+  so the profile fingerprint matches its benchmarks all week. One spec (about 420 logs, ~2,300 WCL
+  points) fits inside an hour's point budget, so runs rarely wait on WCL. Runs in slots with no
+  spec (8 a week) catch up the stalest spec not completed within 8 days: a failed or cut-short
+  run, or one never built.
 - **The app uses the job's profile.** Snapshots are only valid with the profile they were parsed
   with, so the app loads the published profile instead of fetching the APL from GitHub itself.
   The bundle records the profile's `profileFingerprint`, and the app only uses its snapshots
@@ -68,27 +70,29 @@ See `src/wowcompare/benchmarks/reference.ts`.
    _Account → Workers KV Storage → Edit_ on top of _Cloudflare Pages → Edit_. Tokens made from the
    "Edit Cloudflare Workers" template already have both. Without them the job fails with HTTP 403.
    `CLOUDFLARE_ACCOUNT_ID` is already set for deploys.
-4. Run it once by hand: Actions → _Benchmarks_ → _Run workflow_. To try it narrowly first,
-   pass e.g. `--spec Druid:Feral --difficulty 5`. For a first release, `--spec Druid --spec Evoker
---all` builds those classes first, then the rest. A run that hits the time limit leaves the
-   rest to the daily catch-up.
+4. Run it once by hand: Actions → _Benchmarks_ → _Run workflow_. To try it narrowly first, pass
+   e.g. `--spec Druid:Feral --difficulty 5`. `--spec Druid --spec Evoker` builds those classes in
+   that order; `--all` builds everything (pass `--max-minutes 330` too).
+5. To choose which stale specs free slots catch up first, set the repository variable
+   `BENCHMARK_ARGS` to e.g. `--first Druid --first Evoker --first DeathKnight`. Every spec is also
+   built in its own weekly slot regardless.
 
 ## Limits to watch
 
 - **WCL points.** About 5.4 points per parsed log, so roughly 650 logs an hour within the
   3,600-point budget, shared with anything else using the same API client (including local runs).
-  The job checks `rateLimitData` every 15s and pauses every worker for the hourly reset before
-  using the last 10%. If WCL still answers 429, it waits for the reset and retries. A day is up to 6 specs × 10 bosses × 2 difficulties × 21 logs
-  ≈ 2,500 logs, about 4 hours. Logs already parsed with the same profile come from
-  `actions/cache` and cost nothing.
-- **Time.** Parsing stops at `--max-minutes` (330), and whatever is left waits for the daily
-  catch-up. A spec only counts as complete when every boss built; otherwise the next run retries
-  it. Changing what "complete" means (e.g. how reference logs are chosen) needs a bump of
-  `STATUS_VERSION` in `published.ts`, which makes every spec due again.
-- **Run time.** Daily at 23:47 UTC (`RUN_TIME_UTC` in `schedule.ts`, and the workflow's cron).
-- **KV writes.** The free plan allows 1,000 a day. A day writes one profile and about 20 bundles
-  per spec, plus the status entry after each spec: roughly 130. Entries expire after 21 days, so
-  a class that misses two weeks drops out rather than going stale.
+  A spec is about 420 logs. The job checks `rateLimitData` every 15s and pauses every worker for
+  the hourly reset before using the last 10%. If WCL still answers 429, it waits for the reset and
+  retries. Logs already parsed with the same profile come from `actions/cache` and cost nothing.
+- **Time.** Parsing stops at `--max-minutes` (110 by default, so a run ends before the next slot),
+  and whatever is left waits for a free slot. A spec only counts as complete when every boss built;
+  otherwise it's caught up. Changing what "complete" means (e.g. how reference logs are chosen)
+  needs a bump of `STATUS_VERSION` in `published.ts`, which makes every spec due again.
+- **Actions minutes.** The repository is private: 42 runs a week of roughly 5–10 minutes each
+  (setup is ~4), about 1,500 minutes a month.
+- **KV writes.** The free plan allows 1,000 a day. A spec writes one profile, about 20 bundles and
+  the status: at most ~140 a day. Entries expire after 21 days, so a spec that misses two weeks
+  drops out rather than going stale.
 
 ## Running it locally
 

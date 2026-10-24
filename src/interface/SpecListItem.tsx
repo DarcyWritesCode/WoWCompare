@@ -103,9 +103,7 @@ const SpecListItem = ({
         {/* oxlint-disable-next-line wowanalyzer/no-br -- Baseline suppression */}
         <br />
         {maintainerDescription}
-        {branch === GameBranch.Retail && (
-          <LiveCompareStatus specId={spec.id} wclClassName={spec.wclClassName} />
-        )}
+        {branch === GameBranch.Retail && <LiveCompareStatus specId={spec.id} />}
       </div>
     </Component>
   );

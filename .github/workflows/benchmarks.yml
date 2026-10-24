@@ -1,13 +1,14 @@
 name: Benchmarks
 
-# Daily: rebuilds the classes scheduled for today (src/wowcompare/benchmarks/schedule.ts), so each
-# spec is rebuilt weekly, plus any stale spec. For every Heroic and Mythic boss of the current raid
+# Every two hours: rebuilds the one spec whose weekly slot it is (src/wowcompare/benchmarks/
+# schedule.ts), or in a free slot the stalest spec. For every Heroic and Mythic boss of the current raid
 # it parses the #1 and the logs around the 90th percentile and publishes them to Cloudflare KV for
 # Live Compare. See scripts/benchmarks/README.md.
 on:
   schedule:
-    # Keep in step with RUN_TIME_UTC in schedule.ts (shown on the specs page).
-    - cron: '47 23 * * *'
+    # Keep in step with SLOT_HOURS, SLOT_MINUTE and SLOTS_PER_DAY in schedule.ts (shown on the
+    # specs page).
+    - cron: '47 0-10/2 * * *'
   workflow_dispatch:
     inputs:
       args:
@@ -28,7 +29,8 @@ jobs:
   benchmarks:
     name: 'Build benchmarks'
     runs-on: ubuntu-24.04
-    # GitHub's limit is 360; the job itself stops parsing at --max-minutes (330 by default).
+    # GitHub's limit is 360. The job stops parsing at --max-minutes: 110 by default, so a run ends
+    # before the next slot; a manual --all run can pass up to 330.
     timeout-minutes: 355
     if: github.repository == 'DarcyWritesCode/WoWCompare'
     steps:

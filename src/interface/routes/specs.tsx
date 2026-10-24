@@ -67,8 +67,8 @@ export function Component() {
         <Trans id="interface.specList.specs.label">
           Click any specialization to view an example report for that spec.
         </Trans>{' '}
-        Live Compare rebuilds each class's benchmarks once a week, on the day shown on its specs,
-        against parses spread over the {REFERENCE_LABEL}.
+        Live Compare rebuilds each spec's benchmarks once a week, at the time shown on it, against
+        parses spread over the {REFERENCE_LABEL}.
       </small>
 
       <div>

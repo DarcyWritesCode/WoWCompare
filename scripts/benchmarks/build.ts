@@ -20,7 +20,6 @@ import { USE_WCL_V2 } from 'common/fetchWclApi';
 import { setAccessToken } from 'common/wclV2/auth';
 import { wclQuery, WclV2RateLimitError } from 'common/wclV2/graphql';
 import ROLES from 'game/ROLES';
-import configs from 'parser';
 import Config from 'parser/Config';
 import { parseLogSnapshot } from 'wowcompare/benchmarks/parseLog';
 import {
@@ -41,9 +40,10 @@ import {
 } from 'wowcompare/benchmarks/published';
 import { fetchRankingsPool, RankedParse } from 'wowcompare/benchmarks/rankings';
 import { isExternallyBuffed, selectReference } from 'wowcompare/benchmarks/reference';
-import { STALE_AFTER_MS, updateDay, WEEKDAY_NAMES } from 'wowcompare/benchmarks/schedule';
+import { slotAt, slotTimeUtc, STALE_AFTER_MS, WEEKDAY_NAMES } from 'wowcompare/benchmarks/schedule';
+import { BENCHMARK_CONFIGS, SPEC_SLOTS } from 'wowcompare/benchmarks/specs';
 import { LogSnapshot } from 'wowcompare/metrics/results';
-import { aplUrl, hasSimcApl, setProfile } from 'wowcompare/profile/registry';
+import { aplUrl, setProfile } from 'wowcompare/profile/registry';
 import { buildProfile } from 'wowcompare/simc/buildProfile';
 import { getAdapter } from 'wowcompare/simc/specs';
 
@@ -86,8 +86,8 @@ const { values: args } = parseArgs({
      */
     spec: { type: 'string', multiple: true, default: [] },
     /**
-     * With the schedule: these classes or specs go first, in this order, if they're due (scheduled
-     * today or stale), e.g. to choose the order of a first release.
+     * With the schedule: in a free slot, catch up these classes or specs first, in this order, if
+     * they're stale, e.g. to choose the order of a first release.
      */
     first: { type: 'string', multiple: true, default: [] },
     /** Every spec, whatever the schedule says (after any `--spec` ones). */
@@ -95,7 +95,8 @@ const { values: args } = parseArgs({
     /** These encounter IDs instead of the current raid (required in v1 mode). */
     encounter: { type: 'string', multiple: true, default: [] },
     difficulty: { type: 'string', multiple: true, default: [] },
-    'max-minutes': { type: 'string', default: '330' },
+    /** Default: done before the next two-hourly run; pass more for `--all`. */
+    'max-minutes': { type: 'string', default: '110' },
     concurrency: { type: 'string', default: '4' },
     'cache-dir': { type: 'string', default: 'node_modules/.cache/wc-benchmarks-cache' },
   },
@@ -433,14 +434,11 @@ const specName = (config: Config) => `${config.spec.wclSpecName} ${config.spec.w
 
 /**
  * The specs to rebuild, in order: `--spec` entries in the order given, then every other spec with
- * `--all`; without either, the classes scheduled for today, then specs not completed within
- * `STALE_AFTER_MS` (a failed or cut-short run, or a spec never built), oldest first, with any
- * `--first` ones moved to the front.
+ * `--all`. Without either, one spec: the one whose weekly slot this run is, else the stalest spec
+ * not completed within `STALE_AFTER_MS` (a failed or cut-short run, or never built), preferring
+ * `--first` ones.
  */
 function specsToBuild(status: BenchmarkStatus): Config[] {
-  const withApl = configs.filter(
-    (config) => config.parser !== undefined && hasSimcApl(config.spec.id),
-  );
   /** Specs matching each name, in the order named. */
   const named = (names: string[], from: Config[]) => [
     ...new Set(
@@ -455,23 +453,32 @@ function specsToBuild(status: BenchmarkStatus): Config[] {
     ),
   ];
   if (args.all || args.spec.length > 0) {
-    const ordered = named(args.spec, withApl);
-    return args.all ? [...ordered, ...withApl.filter((c) => !ordered.includes(c))] : ordered;
+    const ordered = named(args.spec, BENCHMARK_CONFIGS);
+    return args.all
+      ? [...ordered, ...BENCHMARK_CONFIGS.filter((c) => !ordered.includes(c))]
+      : ordered;
   }
-  const today = new Date().getUTCDay();
+  const now = slotAt(new Date());
+  const label = `${WEEKDAY_NAMES[now.day]} ${slotTimeUtc(now.slot)}`;
+  const scheduled = BENCHMARK_CONFIGS.find((config) => {
+    const slot = SPEC_SLOTS.get(config.spec.id);
+    return slot?.day === now.day && slot.slot === now.slot;
+  });
+  if (scheduled) {
+    say(`${label}: ${specName(scheduled)}'s weekly slot`);
+    return [scheduled];
+  }
   const completedAt = (config: Config) => status.specs[config.spec.id]?.completedAt ?? 0;
-  const scheduled = withApl.filter((config) => updateDay(config.spec.wclClassName) === today);
-  const stale = withApl
-    .filter(
-      (config) => !scheduled.includes(config) && Date.now() - completedAt(config) > STALE_AFTER_MS,
-    )
-    .sort((a, b) => completedAt(a) - completedAt(b));
+  const stale = BENCHMARK_CONFIGS.filter(
+    (config) => Date.now() - completedAt(config) > STALE_AFTER_MS,
+  ).sort((a, b) => completedAt(a) - completedAt(b));
+  const next = named(args.first, stale)[0] ?? stale[0];
   say(
-    `${WEEKDAY_NAMES[today]}: ${scheduled.length} scheduled specs, ${stale.length} stale ones to catch up`,
+    next
+      ? `${label}: free slot, catching up ${specName(next)} (${stale.length} stale)`
+      : `${label}: free slot, nothing stale`,
   );
-  const due = [...scheduled, ...stale];
-  const first = named(args.first, due);
-  return [...first, ...due.filter((c) => !first.includes(c))];
+  return next ? [next] : [];
 }
 
 async function fetchText(url: string): Promise<string> {
