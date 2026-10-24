@@ -2,7 +2,7 @@ import fetchWcl, { USE_WCL_V2 } from 'common/fetchWclApi';
 import { WCLRanking, WCLRankingsResponse } from 'common/WCL_TYPES';
 import { wclQuery } from 'common/wclV2/graphql';
 
-import { targetRanks } from './reference';
+import { PercentileBand, REFERENCE_BAND, REFERENCE_CANDIDATES, targetRanks } from './reference';
 
 /** One ranked parse, flattened to what benchmark selection needs. */
 export interface RankedParse {
@@ -121,18 +121,23 @@ async function fetchTotalParses(query: RankingsQuery, parse: RankedParse): Promi
 export interface RankingsPool {
   /** The #1 parse. */
   top: RankedParse | undefined;
-  /** Parses on the rankings pages covering the reference band, best first. */
+  /** Parses on the rankings pages covering the band, best first. */
   pool: RankedParse[];
   /** Ranked parses for the spec, boss and difficulty; null when unknown (v1 mode). */
   totalParses: number | null;
 }
 
 /**
- * The #1 parse plus the parses spread over `REFERENCE_BAND`. v2 mode looks up the total number of
- * parses and fetches the pages holding the band's target ranks (usually two to six queries).
+ * The #1 parse plus the parses spread over `band` (`count` target ranks). v2 mode looks up the
+ * total number of parses and fetches the pages holding the target ranks (usually two to six
+ * queries for the reference band).
  * Through the upstream proxy (v1 mode) only the top 100 are available, so the pool is those.
  */
-export async function fetchRankingsPool(query: RankingsQuery): Promise<RankingsPool> {
+export async function fetchRankingsPool(
+  query: RankingsQuery,
+  band: PercentileBand = REFERENCE_BAND,
+  count = REFERENCE_CANDIDATES,
+): Promise<RankingsPool> {
   if (!USE_WCL_V2) {
     const response = await fetchWcl<WCLRankingsResponse>(
       `rankings/encounter/${query.encounterId}`,
@@ -159,7 +164,9 @@ export async function fetchRankingsPool(query: RankingsQuery): Promise<RankingsP
   }
   const pages = [
     ...new Set(
-      targetRanks(totalParses, MAX_PAGE * PAGE_SIZE).map((rank) => Math.ceil(rank / PAGE_SIZE)),
+      targetRanks(totalParses, MAX_PAGE * PAGE_SIZE, band, count).map((rank) =>
+        Math.ceil(rank / PAGE_SIZE),
+      ),
     ),
   ];
   let pool: RankedParse[] = [];

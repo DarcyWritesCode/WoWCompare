@@ -46,7 +46,12 @@ import {
   effectRows,
   fitBuffEffects,
 } from 'wowcompare/benchmarks/buffEffects';
-import { isExternallyBuffed, selectReference } from 'wowcompare/benchmarks/reference';
+import {
+  isExternallyBuffed,
+  PercentileBand,
+  selectReference,
+  targetRanks,
+} from 'wowcompare/benchmarks/reference';
 import { slotAt, slotTimeUtc, STALE_AFTER_MS, WEEKDAY_NAMES } from 'wowcompare/benchmarks/schedule';
 import { BENCHMARK_CONFIGS, SPEC_SLOTS } from 'wowcompare/benchmarks/specs';
 import { LogSnapshot } from 'wowcompare/metrics/results';
@@ -73,6 +78,12 @@ const EFFECT_LOGS_PER_SPEC = 3000;
 const EFFECT_ROW_MAX_AGE_MS = 28 * 24 * 60 * 60 * 1000;
 /** New logs a collector run parses per spec, boss and difficulty before moving on. */
 const COLLECT_PER_BOSS = 8;
+/**
+ * Where the collector draws from: wider and lower than the reference band, since buff effects
+ * need windows where cooldowns weren't lined up, which the reference band's players rarely miss.
+ * Rankings stop at rank 2,000, so a popular boss's band ends higher than its 50th percentile.
+ */
+const COLLECT_BAND: PercentileBand = { from: 50, to: 95 };
 /** Parsed logs not reused for this long are dropped from the job's own cache (a week + slack). */
 const CACHE_PRUNE_AFTER_MS = 9 * 24 * 60 * 60 * 1000;
 /**
@@ -740,8 +751,8 @@ async function publishEffects(config: Config, rows: EffectRow[], store: Store) {
 }
 
 /**
- * Collector mode (`--collect`, the idle hours between scheduled builds): parses extra logs from
- * the rankings around the reference band, only for buff effects, spending WCL points the
+ * Collector mode (`--collect`, the idle hours between scheduled builds): parses extra logs spread
+ * over `COLLECT_BAND` of the rankings, only for buff effects, spending WCL points the
  * schedule leaves unused. Specs with the fewest collected logs go first; each gets up to
  * `COLLECT_PER_BOSS` new logs per boss and difficulty, then its effects are refitted.
  */
@@ -767,19 +778,31 @@ async function collect(
     try {
       for (const difficulty of difficulties) {
         for (const encounter of encounters) {
-          const { pool } = await budget.retry(() =>
-            fetchRankingsPool({
-              encounterId: encounter.id,
-              difficulty,
-              className: config.spec.wclClassName,
-              specName: config.spec.wclSpecName,
-              metric: config.spec.role === ROLES.HEALER ? 'hps' : 'dps',
-            }),
+          const { pool, totalParses } = await budget.retry(() =>
+            fetchRankingsPool(
+              {
+                encounterId: encounter.id,
+                difficulty,
+                className: config.spec.wclClassName,
+                specName: config.spec.wclSpecName,
+                metric: config.spec.role === ROLES.HEALER ? 'hps' : 'dps',
+              },
+              COLLECT_BAND,
+              COLLECT_PER_BOSS,
+            ),
           );
           const fresh = pool.filter((p) => !collected.has(logKey({ ...p, playerName: p.name })));
-          // Spread over the pool rather than its top.
-          const step = Math.max(1, Math.floor(fresh.length / COLLECT_PER_BOSS));
-          const picks = fresh.filter((_, i) => i % step === 0).slice(0, COLLECT_PER_BOSS);
+          // The fresh parse nearest each target rank, so later runs move out from the targets.
+          const deepest = pool.reduce((max, p) => Math.max(max, p.rank), 0);
+          const picks: RankedParse[] = [];
+          for (const target of targetRanks(totalParses, deepest, COLLECT_BAND, COLLECT_PER_BOSS)) {
+            const nearest = fresh
+              .filter((p) => !picks.includes(p))
+              .sort((a, b) => Math.abs(a.rank - target) - Math.abs(b.rank - target))[0];
+            if (nearest) {
+              picks.push(nearest);
+            }
+          }
           await eachLimit(picks, Number(args.concurrency), async (parse) => {
             const snapshot = await snapshotOf(config, fingerprint, parse, null, budget);
             if (snapshot) {

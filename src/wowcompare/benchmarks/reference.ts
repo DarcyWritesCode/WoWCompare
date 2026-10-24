@@ -11,7 +11,12 @@ import type { RankedParse } from './rankings';
  * player (Power Infusion, Augmentation, short kills), which makes advice drawn from them
  * unreachable.
  */
-export const REFERENCE_BAND = { from: 90, to: 95 } as const;
+export interface PercentileBand {
+  from: number;
+  to: number;
+}
+
+export const REFERENCE_BAND: PercentileBand = { from: 90, to: 95 };
 export const REFERENCE_LABEL = `${REFERENCE_BAND.from}–${REFERENCE_BAND.to}th percentile`;
 /**
  * Logs parsed per boss, evenly spread over the band. Parsing the whole band would take thousands
@@ -71,17 +76,22 @@ export const percentileOfRank = (rank: number, totalParses: number) =>
   Math.max(0, Math.min(100, 100 * (1 - rank / totalParses)));
 
 /**
- * The ranks to take candidates at: `REFERENCE_CANDIDATES` evenly spread over the band, no deeper
- * than `deepest`. Without a total, only `deepest` (the deepest parses stand in for the band).
+ * The ranks to take candidates at: `count` evenly spread over `band`, no deeper than `deepest`.
+ * Without a total, only `deepest` (the deepest parses stand in for the band).
  */
-export function targetRanks(totalParses: number | null, deepest: number): number[] {
+export function targetRanks(
+  totalParses: number | null,
+  deepest: number,
+  band = REFERENCE_BAND,
+  count = REFERENCE_CANDIDATES,
+): number[] {
   if (totalParses === null) {
     return [deepest];
   }
-  const best = Math.min(rankAtPercentile(totalParses, REFERENCE_BAND.to), deepest);
-  const worst = Math.min(rankAtPercentile(totalParses, REFERENCE_BAND.from), deepest);
-  return Array.from({ length: REFERENCE_CANDIDATES }, (_, i) =>
-    Math.round(best + ((worst - best) * i) / (REFERENCE_CANDIDATES - 1)),
+  const best = Math.min(rankAtPercentile(totalParses, band.to), deepest);
+  const worst = Math.min(rankAtPercentile(totalParses, band.from), deepest);
+  return Array.from({ length: count }, (_, i) =>
+    Math.round(best + ((worst - best) * i) / Math.max(1, count - 1)),
   );
 }
 

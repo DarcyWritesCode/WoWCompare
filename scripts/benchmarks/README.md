@@ -65,8 +65,10 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
 - **Data.** Any one boss's reference logs are far too few (no strategy was usable at 15 logs), so
   effects pool every boss and difficulty of a spec, over the most recent 3,000 logs within 28 days
   (`EFFECT_LOGS_PER_SPEC`), and need 200 logs per cooldown. Scheduled builds add their logs, and
-  collector runs (`--collect`, hourly 12:17–23:17 UTC, when no build runs) parse more from the
-  rankings around the reference band, specs with the fewest logs first. The rows live in the
+  collector runs (`--collect`, hourly 12:17–23:17 UTC, when no build runs) parse more spread over the
+  50–95th percentile (`COLLECT_BAND`), specs with the fewest logs first: wider and lower than the
+  reference band, since the reference band's players rarely miss a line-up and effects need
+  windows where one was missed. The rows live in the
   job's cache (`effects/<specId>.jsonl`); the fit is published as `effects-<specId>`.
 - **What's suggested.** Only the APL's own cooldowns overlapping each other: a proc or passive buff
   being up during a window reflects how the window went, not a choice. Procs the profile tracks
