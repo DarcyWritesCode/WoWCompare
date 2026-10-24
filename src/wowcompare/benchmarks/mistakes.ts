@@ -252,7 +252,7 @@ function samples(log: LogSnapshot, token: string): WindowSample[] {
       ? [
           {
             state: set.entryStates[i],
-            value: (window.dps * window.durationMs) / 1000 / log.fightDps,
+            value: window.dps / log.fightDps,
           },
         ]
       : [],
