@@ -9,6 +9,12 @@ import { LogSnapshot } from '../metrics/results';
  * window and the resources at the cast, within each log (log fixed effects, so gear, comp, fight
  * and player cancel out), with every other buff as a control (so Bloodlust or a potion isn't
  * credited to a class buff), lightly ridge-regularized. Confidence comes from resampling logs.
+ *
+ * Checked against real Frost DK logs, two guards were needed (see `significantEffect`): a buff
+ * that is almost always up (Icy Talons in Pillar of Frost) only varies by a few percent, and the
+ * fit extrapolates that to absurd effects; and an effect that changes a lot with the controls
+ * (Pillar of Frost in Breath of Sindragosa: +0.83 with every buff, +0.05 with resources only) is
+ * driven by what's controlled for, not measured.
  */
 
 /** One cooldown window, reduced to what the fit needs. */
@@ -34,6 +40,9 @@ export interface BuffEffect {
   /** 90% interval from resampling logs. */
   low: number;
   high: number;
+  /** The same fit with only resources as controls. */
+  resourcesOnly: number;
+  /** Logs with the buff clearly up for one window and clearly not for another. */
   logs: number;
   windows: number;
 }
@@ -56,6 +65,8 @@ const MIN_FEATURE_SHARE = 0.1;
 const MIN_LOGS = 200;
 /** Ridge penalty per 100 windows; shrinks noisy controls without biasing well-measured ones. */
 const RIDGE_PER_100 = 1;
+/** A window counts as "clearly up" at this share or more, and "clearly not" at 1 minus it. */
+const CLEARLY_UP = 0.75;
 const BOOTSTRAP_ROUNDS = 40;
 
 export function effectRows(log: string, snapshot: LogSnapshot, at: number): EffectRow[] {
@@ -187,7 +198,9 @@ function fitCooldown(cooldown: string, rows: EffectRow[]): BuffEffect[] {
         xtx,
         xty,
         n: logRows.length,
-        varies: buffs.map((_, j) => xs.some((x) => x[j] !== xs[0][j])),
+        contrast: buffs.map(
+          (_, j) => xs.some((x) => x[j] >= CLEARLY_UP) && xs.some((x) => x[j] <= 1 - CLEARLY_UP),
+        ),
       },
     ];
   });
@@ -211,13 +224,19 @@ function fitCooldown(cooldown: string, rows: EffectRow[]): BuffEffect[] {
     }
     return { xtx, xty, n };
   };
-  /** The coefficient of feature `free`, with every other feature ridge-shrunk as a control. */
-  const fit = ({ xtx, xty, n }: ReturnType<typeof totals>, free: number) => {
+  const everything = Array.from({ length: p }, (_, j) => j);
+  const resourceFeatures = resources.map((_, i) => buffs.length + i);
+  /**
+   * The coefficient of feature `free`, with the `controls` features ridge-shrunk. A subset of
+   * features only needs the matching rows and columns of the sums.
+   */
+  const fit = ({ xtx, xty, n }: ReturnType<typeof totals>, free: number, controls = everything) => {
     const ridge = (RIDGE_PER_100 * n) / 100;
+    const used = [free, ...controls.filter((j) => j !== free)];
     return solve(
-      xtx.map((row, j) => row.map((v, k) => (j === k && j !== free ? v + ridge : v))),
-      xty,
-    )[free];
+      used.map((j) => used.map((k) => (j === k && j !== free ? xtx[j][k] + ridge : xtx[j][k]))),
+      used.map((j) => xty[j]),
+    )[0];
   };
 
   const all = totals(perLog);
@@ -233,7 +252,8 @@ function fitCooldown(cooldown: string, rows: EffectRow[]): BuffEffect[] {
       effect: fit(all, j),
       low: percentile(samples, 5),
       high: percentile(samples, 95),
-      logs: perLog.filter((l) => l.varies[j]).length,
+      resourcesOnly: fit(all, j, resourceFeatures),
+      logs: perLog.filter((l) => l.contrast[j]).length,
       windows: counts.get(buff) ?? 0,
     };
   });
@@ -244,17 +264,28 @@ export function fitBuffEffects(rows: EffectRow[]): BuffEffect[] {
   return [...byCooldown].flatMap(([cooldown, cooldownRows]) => fitCooldown(cooldown, cooldownRows));
 }
 
-/** An effect is only used once this many logs had the buff both on and off in windows. */
+/** An effect is only used once this many logs had the buff clearly on and clearly off. */
 const MIN_EFFECT_LOGS = 20;
+/** The fits with and without the buff controls may differ by at most this factor. */
+const MAX_CONTROL_RATIO = 3;
 
-/** The effect of `buff` on `cooldown`'s windows, if it's well measured and clearly not zero. */
+/**
+ * The effect of `buff` on `cooldown`'s windows, if it's well measured, clearly not zero, and about
+ * the same whichever controls are used. Of the two fits, the smaller effect is used.
+ */
 export function significantEffect(
   effects: BuffEffects | null,
   cooldown: string,
   buff: string,
 ): BuffEffect | undefined {
   const found = effects?.effects.find((e) => e.cooldown === cooldown && e.buff === buff);
-  return found && found.logs >= MIN_EFFECT_LOGS && (found.low > 0 || found.high < 0)
-    ? found
+  if (!found || found.logs < MIN_EFFECT_LOGS || !(found.low > 0 || found.high < 0)) {
+    return undefined;
+  }
+  // Effects published before `resourcesOnly` existed can't be checked.
+  const other = found.resourcesOnly ?? 0;
+  const [small, large] = [found.effect, other].sort((a, b) => Math.abs(a) - Math.abs(b));
+  return found.effect * other > 0 && Math.abs(large) <= MAX_CONTROL_RATIO * Math.abs(small)
+    ? { ...found, effect: small }
     : undefined;
 }

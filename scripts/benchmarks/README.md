@@ -51,6 +51,13 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
   across logs (the earlier method) or comparing within logs without controls were off by 0.04 to
   0.14 window strength. 90% intervals come from resampling logs, and only effects whose interval
   excludes zero are used.
+- **Guards.** Planted effects are random; real buffs aren't, and the first real Frost DK fit
+  (418 logs) had Icy Talons tripling Pillar of Frost and Pillar adding 83% to Breath of
+  Sindragosa. So an effect is only used when at least 20 logs have the buff clearly up (75%+ of a
+  window) in one window and clearly not (25% or less) in another (Icy Talons is up 96–100% of
+  every Pillar), and when the fit with only resources as controls agrees in sign and within 3x;
+  the smaller of the two is used (Pillar in Breath: +0.83 vs +0.05, dropped; Breath in Pillar:
+  +0.37 vs +0.81, used at +0.37).
 - **Data.** Any one boss's reference logs are far too few (no strategy was usable at 15 logs), so
   effects pool every boss and difficulty of a spec, over the most recent 3,000 logs within 28 days
   (`EFFECT_LOGS_PER_SPEC`), and need 200 logs per cooldown. Scheduled builds add their logs, and
@@ -58,7 +65,9 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
   rankings around the reference band, specs with the fewest logs first. The rows live in the
   job's cache (`effects/<specId>.jsonl`); the fit is published as `effects-<specId>`.
 - **What's suggested.** Only the APL's own cooldowns overlapping each other: a proc or passive buff
-  being up during a window reflects how the window went, not a choice.
+  being up during a window reflects how the window went, not a choice. Procs the profile tracks
+  (Apex Predator's Craving, Rime) are judged on being spent instead ("Spend X before it's
+  wasted"): getting few is luck, letting them expire isn't.
 
 ## Why this design
 
