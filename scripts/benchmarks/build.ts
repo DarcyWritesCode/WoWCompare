@@ -27,10 +27,11 @@ import {
   BenchmarkBundle,
   BenchmarkStatus,
   BundleStatus,
-  bundleKey,
   effectsKey,
   isCurrentStatus,
   logKey,
+  PackIndex,
+  packKey,
   profileFingerprint,
   profileKey,
   PublishedProfile,
@@ -412,6 +413,42 @@ async function ensureKvNamespace(): Promise<string> {
   return id;
 }
 
+/**
+ * Fields that change on every rebuild even when the data doesn't, left out of `contentHash` so
+ * an unchanged value isn't rewritten (KV's free plan allows 1,000 writes a day).
+ */
+const VOLATILE_FIELDS = new Set(['builtAt', 'retrievedAt']);
+const contentHash = (value: unknown) =>
+  sha1(JSON.stringify(value, (key, v) => (VOLATILE_FIELDS.has(key) ? undefined : v)));
+/** An unchanged value is still rewritten after this long, so its TTL doesn't run out. */
+const REWRITE_AFTER_MS = (KV_TTL_SECONDS * 1000) / 3;
+
+/** What the job stores with each KV value. */
+interface KvMetadata {
+  hash: string;
+  writtenAt: number;
+  index?: PackIndex;
+}
+
+/**
+ * Packs bundles into one JSON object by encounter ID, recording where each bundle's JSON sits so
+ * it can be served without parsing the whole pack.
+ */
+function packBundles(bundles: BenchmarkBundle[]): { body: string; index: PackIndex } {
+  const index: PackIndex = {};
+  const parts: string[] = [];
+  let offset = 1; // after `{`
+  bundles.forEach((bundle, i) => {
+    const prefix = `${i > 0 ? ',' : ''}${JSON.stringify(String(bundle.encounterId))}:`;
+    const json = JSON.stringify(bundle);
+    const start = offset + Buffer.byteLength(prefix);
+    offset = start + Buffer.byteLength(json);
+    index[bundle.encounterId] = [start, offset];
+    parts.push(prefix, json);
+  });
+  return { body: `{${parts.join('')}}`, index };
+}
+
 /** Where published data goes: Cloudflare KV, or the dev server's directory with `--local`. */
 class Store {
   private constructor(
@@ -431,14 +468,72 @@ class Store {
     return `/storage/kv/namespaces/${this.namespaceId}/values/${encodeURIComponent(key)}`;
   }
 
-  async put(key: string, value: unknown) {
-    const body = JSON.stringify(value);
+  /** Writes `value` unless the store already holds the same content (ignoring `builtAt`). */
+  async put(key: string, value: unknown, options: { always?: boolean } = {}) {
+    await this.write(key, JSON.stringify(value), contentHash(value), undefined, options.always);
+  }
+
+  /** Writes bundles as one pack (see `packKey`), unless unchanged. */
+  async putPack(key: string, bundles: BenchmarkBundle[]) {
+    const { body, index } = packBundles(bundles);
+    await this.write(key, body, contentHash(bundles), index);
+  }
+
+  private async write(
+    key: string,
+    body: string,
+    hash: string,
+    index: PackIndex | undefined,
+    always = false,
+  ) {
+    const previous = await this.metadata(key);
+    if (!always && previous?.hash === hash && Date.now() - previous.writtenAt < REWRITE_AFTER_MS) {
+      stats.unchanged += 1;
+      return;
+    }
+    const metadata: KvMetadata = { hash, writtenAt: Date.now(), index };
     if (this.local) {
       fs.writeFileSync(path.join(LOCAL_DIR, `${key}.json`), body);
+      fs.writeFileSync(path.join(LOCAL_DIR, `${key}.meta.json`), JSON.stringify(metadata));
     } else {
-      await cloudflare('PUT', `${this.valuePath(key)}?expiration_ttl=${KV_TTL_SECONDS}`, body);
+      // Metadata needs the multipart form of the API.
+      const form = new FormData();
+      form.append('value', body);
+      form.append('metadata', JSON.stringify(metadata));
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${requireEnv('CLOUDFLARE_ACCOUNT_ID')}${this.valuePath(key)}?expiration_ttl=${KV_TTL_SECONDS}`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${requireEnv('CLOUDFLARE_API_TOKEN')}` },
+          body: form,
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          `Cloudflare PUT ${key} failed: HTTP ${response.status} ${await response.text()}`,
+        );
+      }
     }
     stats.published += 1;
+  }
+
+  /** The metadata the job stored with `key`; null if none (or written before metadata). */
+  private async metadata(key: string): Promise<KvMetadata | null> {
+    if (this.local) {
+      const file = path.join(LOCAL_DIR, `${key}.meta.json`);
+      return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as KvMetadata) : null;
+    }
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${requireEnv('CLOUDFLARE_ACCOUNT_ID')}/storage/kv/namespaces/${this.namespaceId}/metadata/${encodeURIComponent(key)}`,
+      { headers: { Authorization: `Bearer ${requireEnv('CLOUDFLARE_API_TOKEN')}` } },
+    );
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`Cloudflare GET metadata ${key} failed: HTTP ${response.status}`);
+    }
+    return ((await response.json()) as { result: KvMetadata | null }).result;
   }
 
   async get<T>(key: string): Promise<T | null> {
@@ -461,7 +556,15 @@ class Store {
   }
 }
 
-const stats = { published: 0, parsed: 0, reused: 0, empty: 0, failedLogs: 0, failedBosses: 0 };
+const stats = {
+  published: 0,
+  unchanged: 0,
+  parsed: 0,
+  reused: 0,
+  empty: 0,
+  failedLogs: 0,
+  failedBosses: 0,
+};
 
 const specName = (config: Config) => `${config.spec.wclSpecName} ${config.spec.wclClassName}`;
 
@@ -623,17 +726,16 @@ async function snapshotOf(
 }
 
 /** The #1 and the reference candidates for one spec on one boss and difficulty. */
-async function publishBundle(
+async function buildBundle(
   config: Config,
   published: PublishedProfile,
   encounter: Encounter,
   difficulty: number,
-  store: Store,
   cache: SnapshotCache,
   budget: RateBudget,
   /** Receives every parsed log's windows, for buff effects. */
   rows: EffectRow[],
-): Promise<BundleStatus | null> {
+): Promise<{ bundle: BenchmarkBundle; status: BundleStatus } | null> {
   const { spec } = config;
   const rankings = await budget.retry(() =>
     fetchRankingsPool({
@@ -672,22 +774,24 @@ async function publishBundle(
     }
   });
   bundle.builtAt = Date.now();
-  await store.put(bundleKey(spec.id, encounter.id, difficulty), bundle);
 
   const parsed = candidates
     .map((c) => bundle.snapshots[logKey({ ...c, playerName: c.name })])
     .filter((snapshot): snapshot is LogSnapshot => !!snapshot);
   const ranks = candidates.map((c) => c.rank);
   return {
-    encounterId: encounter.id,
-    encounterName: encounter.name,
-    difficulty,
-    builtAt: bundle.builtAt,
-    totalParses: rankings.totalParses,
-    ranks: ranks.length > 0 ? [Math.min(...ranks), Math.max(...ranks)] : null,
-    logs: parsed.length,
-    buffed: parsed.filter(isExternallyBuffed).length,
-    failed,
+    bundle,
+    status: {
+      encounterId: encounter.id,
+      encounterName: encounter.name,
+      difficulty,
+      builtAt: bundle.builtAt,
+      totalParses: rankings.totalParses,
+      ranks: ranks.length > 0 ? [Math.min(...ranks), Math.max(...ranks)] : null,
+      logs: parsed.length,
+      buffed: parsed.filter(isExternallyBuffed).length,
+      failed,
+    },
   };
 }
 
@@ -876,35 +980,54 @@ async function buildSpec(
   let failures = 0;
   try {
     for (const difficulty of difficulties) {
-      for (const encounter of encounters) {
-        const label = `${specName(config)}, ${encounter.name ?? encounter.id}, difficulty ${difficulty}`;
-        try {
-          const bundle = await publishBundle(
-            config,
-            published,
-            encounter,
-            difficulty,
-            store,
-            cache,
-            budget,
-            rows,
-          );
-          if (bundle) {
-            entry.bundles = [
-              ...entry.bundles.filter(
-                (b) => b.encounterId !== encounter.id || b.difficulty !== difficulty,
-              ),
-              bundle,
-            ];
+      const key = packKey(config.spec.id, difficulty);
+      // Bosses this run doesn't rebuild (cut short, or `--encounter`) keep their earlier bundle.
+      const pack = new Map(
+        Object.values((await store.get<Record<string, BenchmarkBundle>>(key)) ?? {})
+          .filter((bundle) => bundle.snapshotVersion === SNAPSHOT_VERSION)
+          .map((bundle) => [bundle.encounterId, bundle]),
+      );
+      try {
+        for (const encounter of encounters) {
+          const label = `${specName(config)}, ${encounter.name ?? encounter.id}, difficulty ${difficulty}`;
+          try {
+            const built = await buildBundle(
+              config,
+              published,
+              encounter,
+              difficulty,
+              cache,
+              budget,
+              rows,
+            );
+            if (built) {
+              pack.set(encounter.id, built.bundle);
+              entry.bundles = [
+                ...entry.bundles.filter(
+                  (b) => b.encounterId !== encounter.id || b.difficulty !== difficulty,
+                ),
+                built.status,
+              ];
+            }
+            say(label);
+          } catch (err) {
+            if (err instanceof OutOfTime) {
+              throw err;
+            }
+            stats.failedBosses += 1;
+            failures += 1;
+            say(`${label}: ${(err as Error).message}`);
           }
-          say(label);
-        } catch (err) {
-          if (err instanceof OutOfTime) {
-            throw err;
-          }
-          stats.failedBosses += 1;
-          failures += 1;
-          say(`${label}: ${(err as Error).message}`);
+        }
+      } finally {
+        // Bosses no longer in the current raid drop out.
+        if (args.encounter.length === 0) {
+          [...pack.keys()]
+            .filter((id) => !encounters.some((e) => e.id === id))
+            .forEach((id) => pack.delete(id));
+        }
+        if (pack.size > 0) {
+          await store.putPack(key, [...pack.values()]);
         }
       }
     }
@@ -934,7 +1057,8 @@ async function main() {
     : { snapshotVersion: SNAPSHOT_VERSION, version: STATUS_VERSION, updatedAt: 0, specs: {} };
   const saveStatus = async () => {
     status.updatedAt = Date.now();
-    await store.put(STATUS_KEY, status);
+    // Always: the schedule reads its dates, which the content hash ignores.
+    await store.put(STATUS_KEY, status, { always: true });
   };
 
   const encounters: Encounter[] =
@@ -954,7 +1078,7 @@ async function main() {
       say(`Stopped early: ${err.message}.`);
     }
     say(
-      `Collected. Logs parsed ${stats.parsed}, empty ${stats.empty}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
+      `Collected. Published ${stats.published}, unchanged ${stats.unchanged}; logs parsed ${stats.parsed}, empty ${stats.empty}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
     );
     return 0;
   }
@@ -986,7 +1110,7 @@ async function main() {
   }
 
   say(
-    `Done. Published ${stats.published}; logs parsed ${stats.parsed}, reused ${stats.reused}, empty ${stats.empty}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
+    `Done. Published ${stats.published}, unchanged ${stats.unchanged}; logs parsed ${stats.parsed}, reused ${stats.reused}, empty ${stats.empty}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
   );
   // Fail the workflow only when nothing worked, so one bad log or boss doesn't page anyone. A day
   // with nothing due is fine.

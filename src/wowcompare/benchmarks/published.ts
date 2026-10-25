@@ -6,8 +6,8 @@ import type { ReferenceBand } from './reference';
 
 /**
  * Data the benchmark job (scripts/benchmarks/) publishes, read-only to the app: each spec's
- * profile; per spec, boss and difficulty the rankings plus the parsed #1 and reference logs; and a
- * status summary for the specs page. Each class is rebuilt weekly (see schedule.ts).
+ * profile; per spec, boss and difficulty the rankings plus the parsed #1 and reference logs
+ * (packed per spec and difficulty); and a status summary for the specs page. Each class is rebuilt weekly (see schedule.ts).
  * Served by a Cloudflare Pages Function (functions/wc-api/) from KV, and in development by the
  * dev server (vite/publishedDataPlugin.ts) from the job's `--local` output.
  */
@@ -93,8 +93,15 @@ export interface BenchmarkStatus {
 
 /** Storage keys, shared by the job, the Pages Function and the dev server. */
 export const profileKey = (specId: number) => `profile-${specId}`;
-export const bundleKey = (specId: number, encounterId: number, difficulty: number) =>
-  `bench-${specId}-${encounterId}-${difficulty}`;
+/**
+ * A spec's bundles for one difficulty, packed in one value so a rebuild costs one KV write (the
+ * free plan allows 1,000 a day). The value is a JSON object by encounter ID; its metadata holds a
+ * `PackIndex`, so the Pages Function serves one boss by slicing bytes instead of parsing ~10 MB.
+ */
+export const packKey = (specId: number, difficulty: number) => `pack-${specId}-${difficulty}`;
+
+/** UTF-8 byte range `[start, end)` of each encounter's bundle in a pack, by encounter ID. */
+export type PackIndex = Record<string, [number, number]>;
 
 export const STATUS_KEY = 'status';
 export const effectsKey = (specId: number) => `effects-${specId}`;
