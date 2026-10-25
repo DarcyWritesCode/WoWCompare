@@ -141,6 +141,7 @@ const say = (message: string) =>
 // The parser logs a lot per log ("Ability is missing from spellbook", event counts); keep errors.
 console.log = console.info = console.debug = console.warn = () => undefined;
 
+/** The run's time is up (`--max-minutes`); the message says why. */
 class OutOfTime extends Error {}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -201,7 +202,7 @@ class RateBudget {
 
   async ensure() {
     if (Date.now() > deadline) {
-      throw new OutOfTime();
+      throw new OutOfTime(`reached the ${args['max-minutes']}-minute limit`);
     }
     if (this.pause) {
       return this.pause;
@@ -251,7 +252,9 @@ class RateBudget {
     this.pause ??= (async () => {
       const waitMs = limit ? (limit.pointsResetIn + 5) * 1000 : RATE_LIMITED_WAIT_MS;
       if (Date.now() + waitMs > deadline) {
-        throw new OutOfTime();
+        throw new OutOfTime(
+          `WCL budget resets in ${Math.ceil(waitMs / 60_000)} min, past the ${args['max-minutes']}-minute limit`,
+        );
       }
       say(
         `${limit ? `WCL budget at ${limit.pointsSpentThisHour}/${limit.limitPerHour} points` : 'WCL rate limited'}; waiting ${Math.ceil(waitMs / 60_000)} min`,
@@ -778,6 +781,7 @@ async function collect(
     setProfile(config.spec.id, published.profile);
     const fingerprint = profileFingerprint(published.profile);
     const rows: EffectRow[] = [];
+    say(`${specName(config)}: collecting (${collected.size} logs so far)`);
     try {
       collecting: for (const difficulty of difficulties) {
         for (const encounter of encounters) {
@@ -930,6 +934,7 @@ async function main() {
       if (!(err instanceof OutOfTime)) {
         throw err;
       }
+      say(`Stopped early: ${err.message}.`);
     }
     say(
       `Collected. Logs parsed ${stats.parsed}, empty ${stats.empty}, failed ${stats.failedLogs}.`,
@@ -958,7 +963,7 @@ async function main() {
       throw err;
     }
     await saveStatus();
-    say('Out of time; the rest is left for the next run.');
+    say(`Stopped early: ${err.message}; the rest is left for the next run.`);
   } finally {
     cache.prune();
   }

@@ -38,7 +38,7 @@ jobs:
     if: github.repository == 'DarcyWritesCode/WoWCompare'
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v5
         with:
           node-version: '22.x'
@@ -48,7 +48,7 @@ jobs:
         env:
           DISABLE_CHECKER_PLUGIN: true
       # Logs parsed on earlier runs, so a rebuild only parses logs that are new to the reference.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6.1.0
         with:
           path: node_modules/.cache/wc-benchmarks-cache
           key: wc-benchmarks-${{ github.run_id }}
@@ -69,7 +69,7 @@ jobs:
         run: gh workflow run deploy-pages.yml --ref main
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6.1.0
         if: always()
         with:
           path: node_modules/.cache/wc-benchmarks-cache
