@@ -53,8 +53,11 @@ export function buildProfile(
   });
 
   type Candidate = { order: number; entry: Omit<ProfileEntry, 'rank'> };
+  const extraCooldowns = (adapter.extraCooldowns ?? [])
+    .filter((token) => !summary.cooldowns.some((cd) => cd.token === token))
+    .map((token) => ({ token, order: -1 }));
   const candidates: Candidate[] = [
-    ...summary.cooldowns.map((cd) => ({
+    ...[...extraCooldowns, ...summary.cooldowns].map((cd) => ({
       order: cd.order,
       entry: {
         ...ref(cd.token, 'action'),
@@ -72,23 +75,25 @@ export function buildProfile(
         requires: { token: dot.token, spellIds: resolver.resolve(dot.token, 'action') },
       },
     })),
-    ...summary.procs.map((proc) => ({
-      order: proc.order,
-      entry: {
-        ...ref(proc.token, 'buff'),
-        kind: 'buff' as const,
-        // Uptime too: some "procs" are states the APL waits for (e.g. Eclipse), not spendables.
-        metrics: ['procUsage' as const, 'uptime' as const],
-        consumers: [
-          ...proc.consumers.map((c) => ref(c, 'action')),
-          // Extra consumers are exact IDs; an empty token never matches a spell name.
-          ...(adapter.extraConsumers?.[proc.token] ?? []).map((id) => ({
-            token: '',
-            spellIds: [id],
-          })),
-        ],
-      },
-    })),
+    ...summary.procs
+      .filter((proc) => !adapter.extraCooldowns?.includes(proc.token))
+      .map((proc) => ({
+        order: proc.order,
+        entry: {
+          ...ref(proc.token, 'buff'),
+          kind: 'buff' as const,
+          // Uptime too: some "procs" are states the APL waits for (e.g. Eclipse), not spendables.
+          metrics: ['procUsage' as const, 'uptime' as const],
+          consumers: [
+            ...proc.consumers.map((c) => ref(c, 'action')),
+            // Extra consumers are exact IDs; an empty token never matches a spell name.
+            ...(adapter.extraConsumers?.[proc.token] ?? []).map((id) => ({
+              token: '',
+              spellIds: [id],
+            })),
+          ],
+        },
+      })),
   ].sort((a, b) => a.order - b.order);
 
   // Alias tokens (e.g. `bs_inc` and `berserk`) name the same spells; keep the first.

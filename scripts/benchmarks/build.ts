@@ -785,19 +785,33 @@ async function collect(
     try {
       collecting: for (const difficulty of difficulties) {
         for (const encounter of encounters) {
-          const { pool, totalParses } = await budget.retry(() =>
-            fetchRankingsPool(
-              {
-                encounterId: encounter.id,
-                difficulty,
-                className: config.spec.wclClassName,
-                specName: config.spec.wclSpecName,
-                metric: config.spec.role === ROLES.HEALER ? 'hps' : 'dps',
-              },
-              COLLECT_BAND,
-              COLLECT_PER_BOSS,
-            ),
-          );
+          let rankings;
+          try {
+            rankings = await budget.retry(() =>
+              fetchRankingsPool(
+                {
+                  encounterId: encounter.id,
+                  difficulty,
+                  className: config.spec.wclClassName,
+                  specName: config.spec.wclSpecName,
+                  metric: config.spec.role === ROLES.HEALER ? 'hps' : 'dps',
+                },
+                COLLECT_BAND,
+                COLLECT_PER_BOSS,
+              ),
+            );
+          } catch (err) {
+            if (err instanceof OutOfTime) {
+              throw err;
+            }
+            // E.g. the #1 log (read for the parse count) went private; the other bosses still count.
+            stats.failedBosses += 1;
+            say(
+              `${specName(config)}, ${encounter.id}, difficulty ${difficulty}: ${(err as Error).message}`,
+            );
+            continue;
+          }
+          const { pool, totalParses } = rankings;
           const fresh = pool.filter((p) => !collected.has(logKey({ ...p, playerName: p.name })));
           // The fresh parse nearest each target rank, so later runs move out from the targets.
           const deepest = pool.reduce((max, p) => Math.max(max, p.rank), 0);
@@ -940,7 +954,7 @@ async function main() {
       say(`Stopped early: ${err.message}.`);
     }
     say(
-      `Collected. Logs parsed ${stats.parsed}, empty ${stats.empty}, failed ${stats.failedLogs}.`,
+      `Collected. Logs parsed ${stats.parsed}, empty ${stats.empty}, failed ${stats.failedLogs}; bosses failed ${stats.failedBosses}.`,
     );
     return 0;
   }

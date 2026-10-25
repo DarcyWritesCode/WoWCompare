@@ -59,6 +59,31 @@ const OVERRIDES: Record<number, SpecOverrides> = {
   [SPECS.FERAL_DRUID.id]: druidFeral,
   [SPECS.BALANCE_DRUID.id]: druidBalance,
   [SPECS.GUARDIAN_DRUID.id]: druidGuardian,
+  // These APLs cast their big cooldowns from their main or hero-talent lists, so only rotational
+  // casts were found and no window was ever measured.
+  [SPECS.PROTECTION_WARRIOR.id]: {
+    extraCooldowns: ['avatar', 'ravager'],
+    // Ravager is a ground effect; the player has no buff for it.
+    windowMs: { ravager: 12_000 },
+  },
+  [SPECS.PROTECTION_PALADIN.id]: {
+    aliases: {
+      // Sentinel replaces Avenging Wrath; the APL keeps calling it `avenging_wrath`. Most
+      // Protection Paladins take it, so without this almost no log had a window.
+      avenging_wrath: {
+        action: [TALENTS_PALADIN.AVENGING_WRATH_TALENT.id, PALADIN.SENTINEL.id],
+        buff: [TALENTS_PALADIN.AVENGING_WRATH_TALENT.id, PALADIN.SENTINEL.id],
+      },
+    },
+  },
+  [SPECS.BREWMASTER_MONK.id]: {
+    // The APL casts `invoke_niuzao` and waits on the buff's full name.
+    extraCooldowns: ['invoke_niuzao_the_black_ox'],
+    // A summon; the player has no buff for it.
+    windowMs: { invoke_niuzao_the_black_ox: 25_000 },
+  },
+  // Devourer has no window to measure: Void Metamorphosis is entered on Fury, not a cooldown, and
+  // its form has no buff of its own in logs (the Void Metamorphosis aura is up all fight).
 };
 
 const snake = (name: string) => name.replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase();

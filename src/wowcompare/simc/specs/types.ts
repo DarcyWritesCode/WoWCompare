@@ -16,6 +16,12 @@ export interface SpecAdapter {
    * Rake act as if stealthed. Merged with the consumers found in the APL.
    */
   extraConsumers?: Record<string, number[]>;
+  /**
+   * Cooldowns the APL casts outside its cooldown lists without checking `cooldown.x`, e.g.
+   * Protection Warrior's Avatar in its main list. Ranked first; dropped from procs if the APL
+   * also waits on their buff.
+   */
+  extraCooldowns?: string[];
   /** Cooldowns without a buff: window length after each cast, by SimC token. */
   windowMs?: Record<string, number>;
   heroTrees?: HeroTree[];
