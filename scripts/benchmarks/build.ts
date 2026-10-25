@@ -127,7 +127,7 @@ const { values: args } = parseArgs({
     difficulty: { type: 'string', multiple: true, default: [] },
     /** Default: done before the next two-hourly run; pass more for `--all`. */
     'max-minutes': { type: 'string', default: '110' },
-    concurrency: { type: 'string', default: '4' },
+    concurrency: { type: 'string', default: '12' },
     'cache-dir': { type: 'string', default: 'node_modules/.cache/wc-benchmarks-cache' },
   },
 });

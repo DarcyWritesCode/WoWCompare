@@ -122,8 +122,8 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
 
 ## Limits to watch
 
-- **WCL points.** About 5.4 points per parsed log, so roughly 650 logs an hour within the
-  3,600-point budget, shared with anything else using the same API client (including local runs).
+- **WCL points.** About 5.4 points per parsed log, so roughly 3,000 logs an hour within the
+  18,000-point budget (subscribed client; the job reads the limit from WCL), shared with anything else using the same API client (including local runs).
   A spec is about 420 logs. The job checks `rateLimitData` every 15s and pauses every worker for
   the hourly reset before using the last 10%. If WCL still answers 429, it waits for the reset and
   retries. Logs already parsed with the same profile come from `actions/cache` and cost nothing.
@@ -154,5 +154,5 @@ override. You can then leave out `--encounter` to get the current raid.
 
 Options: `--spec` (repeatable, in order: `Druid`, `Feral` or `Druid:Feral`), `--all` (every spec,
 after any `--spec` ones), `--first` (with the schedule: due specs to build first), `--encounter`,
-`--difficulty`, `--max-minutes`, `--concurrency` (logs fetched at once, default 4), `--cache-dir`. Without `--spec` or `--all`, the schedule decides.
+`--difficulty`, `--max-minutes`, `--concurrency` (logs fetched at once, default 12), `--cache-dir`. Without `--spec` or `--all`, the schedule decides.
 `GITHUB_TOKEN`, if set, is used to look up SimC commit dates.
