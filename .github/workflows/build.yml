@@ -82,6 +82,10 @@ jobs:
     needs: [prepare]
     name: 'e2e-build'
     runs-on: ubuntu-24.04
+    # Upstream only for now: the e2e tests analyze a Classic Destruction Warlock log, and this
+    # fork only registers Feral Druid (src/parser/index.ts), so they can't pass here. Skipping
+    # this also skips e2e-test, which needs it.
+    if: github.repository == 'wowanalyzer/wowanalyzer'
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
