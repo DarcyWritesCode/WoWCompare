@@ -820,9 +820,12 @@ async function collect(
               );
             }
           });
-          // A spec whose logs all come back empty would otherwise be first in every run.
-          if (picks.length > 0 && snapshots === 0 && rows.length === 0) {
-            say(`${specName(config)}: no snapshots from ${picks.length} logs; skipped`);
+          // A spec whose logs give no windows (all empty, or no cooldown windows: Brewmaster,
+          // Protection Warrior) never gains logs, so it would otherwise be first in every run.
+          if (picks.length > 0 && rows.length === 0) {
+            say(
+              `${specName(config)}: no windows from ${picks.length} logs (${snapshots} parsed); skipped`,
+            );
             break collecting;
           }
         }
