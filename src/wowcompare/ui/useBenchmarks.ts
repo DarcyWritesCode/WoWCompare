@@ -13,6 +13,7 @@ import {
 } from '../benchmarks/published';
 import { fetchRankingsPool, RankedParse, RankingsQuery } from '../benchmarks/rankings';
 import {
+  inBand,
   percentileOfRank,
   pickReference,
   REFERENCE_LABEL,
@@ -251,8 +252,19 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
         const rankings = bundle?.top ? bundle : await fetchRankingsPool(query);
         let next = selectBenchmarks(rankings, inputs.player);
         if (bundle?.top) {
-          // The candidates the job parsed, even if selection has changed since.
-          next = { ...next, reference: bundle.reference };
+          // The candidates the job parsed, even if selection has changed since (but only those in
+          // the band: bundles built before it was enforced held near-top parses on small bosses).
+          const { totalParses } = bundle.reference;
+          const deepest = bundle.pool.reduce((max, p) => Math.max(max, p.rank), 0);
+          next = {
+            ...next,
+            reference: {
+              ...bundle.reference,
+              candidates: bundle.reference.candidates.filter(
+                (p) => totalParses === null || inBand(p, totalParses, deepest),
+              ),
+            },
+          };
           // Its snapshots only count if they were parsed with this exact profile.
           if (bundle.profileFingerprint === profileFingerprint(profile)) {
             addParsed(new Map(Object.entries(bundle.snapshots)));
@@ -347,22 +359,31 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
         ),
     };
 
-    // The reference everything is scored against: the reference median if loaded, else #1.
+    // The reference everything is scored against: the reference median if loaded, else #1. A
+    // boss with too few parses to fill the band (early Mythic) has none: #1 there is the ceiling.
     const useBand = loaded.includes('reference') && pick.picked.length > 0;
+    const { totalParses } = selection.reference;
+    const tooFew = totalParses !== null && selection.reference.candidates.length === 0;
     const referenceLogs = useBand
       ? snapshotsOf(pick.picked)
-      : snapshotsOf(selection.top ? [selection.top] : []);
+      : snapshotsOf(selection.top && !tooFew ? [selection.top] : []);
     const referenceResults = medianResults(
       profile,
       referenceLogs.map((s) => s.results),
     );
     const reference: BenchmarkReference = {
-      label: useBand ? `the ${BENCHMARK_LABELS.reference}` : 'the #1 parse',
+      label: useBand
+        ? `the ${BENCHMARK_LABELS.reference}`
+        : tooFew
+          ? `the ${REFERENCE_LABEL}`
+          : 'the #1 parse',
       description: useBand
         ? describeReference(selection, pick, excludeBuffed)
-        : selection.top
-          ? describeParse(selection.top)
-          : '',
+        : tooFew
+          ? `Only ${formatNumber(totalParses)} parses so far: too few to have any in the ${REFERENCE_LABEL}`
+          : selection.top
+            ? describeParse(selection.top)
+            : '',
       logs: referenceLogs,
       results: referenceResults,
     };

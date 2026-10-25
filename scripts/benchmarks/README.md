@@ -29,6 +29,10 @@ See `src/wowcompare/benchmarks/reference.ts`.
   gives the #1 log's players include `totalParses`, so the band is ranks `totalParses × 5%` to
   `× 10%`. The job fetches only the rankings pages holding its target ranks. If the band is past
   rank 2,000 (over 40,000 parses), the deepest ranks stand in.
+- **Few parses.** Only parses inside the band count: on a boss with under 10 parses (early
+  Mythic) the band holds none, and Live Compare shows no reference rather than the near-top
+  parses that used to stand in (#1 stays as the ceiling). Buff effects don't depend on it: they're
+  fitted from every boss and difficulty of the spec, so Mythic uses what Heroic measured.
 - **Candidates.** 20 parses at evenly spaced ranks across the band (the whole band can be
   thousands of logs per spec, far past WCL's point budget). Kills more than 3 MADs shorter than
   usual are left out first. The median uses every candidate that parsed.

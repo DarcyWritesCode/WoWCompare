@@ -107,13 +107,27 @@ function withoutShortKills(pool: RankedParse[]): RankedParse[] {
 }
 
 /**
+ * Whether `parse` is inside the band. On a boss with few parses (early Mythic) the band holds a
+ * fraction of a parse, and the nearest parses would be the top ones, so only parses in it count.
+ * A band deeper than the rankings go (rank 2,000) still takes the deepest parses available.
+ */
+export function inBand(parse: RankedParse, totalParses: number, deepest: number): boolean {
+  // Rounded so the band's edge ranks count, but never down to rank 1 of a handful.
+  const best = Math.round(totalParses * (1 - REFERENCE_BAND.to / 100));
+  const worst = Math.floor(totalParses * (1 - REFERENCE_BAND.from / 100));
+  return best > deepest || (parse.rank >= Math.max(1, best) && parse.rank <= worst);
+}
+
+/**
  * The candidates for the reference median from `pool` (ranked parses covering the band, best
- * first): for each of `targetRanks`, the nearest parse not already taken.
+ * first): for each of `targetRanks`, the nearest parse in the band not already taken.
  */
 export function selectReference(pool: RankedParse[], totalParses: number | null): ReferenceBand {
   const deepest = pool.reduce((max, parse) => Math.max(max, parse.rank), 0);
   const targets = targetRanks(totalParses, deepest);
-  const available = withoutShortKills(pool);
+  const available = withoutShortKills(pool).filter(
+    (parse) => totalParses === null || inBand(parse, totalParses, deepest),
+  );
   const candidates: RankedParse[] = [];
   // Several targets can share a nearest parse when the band is narrow; each takes the next one.
   const wanted = targets.length === 1 ? Array(REFERENCE_CANDIDATES).fill(targets[0]) : targets;
