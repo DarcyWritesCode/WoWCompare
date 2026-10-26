@@ -31,30 +31,37 @@ const ROUTES: {
 
 const fileOf = (key: string) => path.join(LOCAL_DIR, `${key}.json`);
 
-function read(route: (typeof ROUTES)[number], m: RegExpExecArray): string | null {
+function read(
+  route: (typeof ROUTES)[number],
+  m: RegExpExecArray,
+): { body: Buffer; gzip?: boolean } | null {
   const file = fileOf(route.key(m));
   if (route.part && route.fallback) {
-    const meta = path.join(LOCAL_DIR, `${route.key(m)}.meta.json`);
-    const range: [number, number] | undefined =
-      fs.existsSync(file) && fs.existsSync(meta)
-        ? JSON.parse(fs.readFileSync(meta, 'utf8')).index?.[route.part(m)]
-        : undefined;
+    const metaFile = path.join(LOCAL_DIR, `${route.key(m)}.meta.json`);
+    const meta: { index?: Record<string, [number, number]>; gzip?: boolean } | null =
+      fs.existsSync(file) && fs.existsSync(metaFile)
+        ? JSON.parse(fs.readFileSync(metaFile, 'utf8'))
+        : null;
+    const range = meta?.index?.[route.part(m)];
     if (range) {
-      return fs.readFileSync(file).subarray(range[0], range[1]).toString('utf8');
+      return { body: fs.readFileSync(file).subarray(range[0], range[1]), gzip: meta?.gzip };
     }
     const fallback = fileOf(route.fallback(m));
-    return fs.existsSync(fallback) ? fs.readFileSync(fallback, 'utf8') : null;
+    return fs.existsSync(fallback) ? { body: fs.readFileSync(fallback) } : null;
   }
-  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  return fs.existsSync(file) ? { body: fs.readFileSync(file) } : null;
 }
 
 function handle(req: IncomingMessage, res: ServerResponse, next: () => void) {
   if (!req.url?.startsWith(PREFIX)) {
     return next();
   }
-  const send = (status: number, body?: string, type = 'text/plain') => {
+  const send = (status: number, body?: string | Buffer, type = 'text/plain', gzip = false) => {
     res.statusCode = status;
     res.setHeader('content-type', type);
+    if (gzip) {
+      res.setHeader('content-encoding', 'gzip');
+    }
     res.end(body);
   };
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -63,9 +70,9 @@ function handle(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const route = req.url.slice(PREFIX.length).split('?')[0];
   for (const entry of ROUTES) {
     const match = entry.pattern.exec(route);
-    const body = match && read(entry, match);
-    if (body !== null) {
-      return send(200, body, 'application/json');
+    const found = match && read(entry, match);
+    if (found) {
+      return send(200, found.body, 'application/json', found.gzip);
     }
   }
   return send(404);

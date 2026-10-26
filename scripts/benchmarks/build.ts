@@ -12,6 +12,7 @@
 import 'wowcompare/benchmarks/workerShim';
 
 import { createHash } from 'node:crypto';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -428,25 +429,36 @@ interface KvMetadata {
   hash: string;
   writtenAt: number;
   index?: PackIndex;
+  /** A pack whose parts are each gzipped; older packs are one plain JSON object. */
+  gzip?: boolean;
 }
 
 /**
- * Packs bundles into one JSON object by encounter ID, recording where each bundle's JSON sits so
- * it can be served without parsing the whole pack.
+ * Packs bundles back to back, each gzipped on its own, recording where each sits so it can be
+ * served as is (`Content-Encoding: gzip`) without unpacking the rest. Gzipped, a pack fits in a KV
+ * value: Shadow Priest's Mythic bundles come to 34 MB of JSON, over the 25 MiB limit.
  */
-function packBundles(bundles: BenchmarkBundle[]): { body: string; index: PackIndex } {
+function packBundles(bundles: BenchmarkBundle[]): { body: Buffer; index: PackIndex } {
   const index: PackIndex = {};
-  const parts: string[] = [];
-  let offset = 1; // after `{`
-  bundles.forEach((bundle, i) => {
-    const prefix = `${i > 0 ? ',' : ''}${JSON.stringify(String(bundle.encounterId))}:`;
-    const json = JSON.stringify(bundle);
-    const start = offset + Buffer.byteLength(prefix);
-    offset = start + Buffer.byteLength(json);
-    index[bundle.encounterId] = [start, offset];
-    parts.push(prefix, json);
+  let offset = 0;
+  const parts = bundles.map((bundle) => {
+    const part = gzipSync(JSON.stringify(bundle));
+    index[bundle.encounterId] = [offset, offset + part.length];
+    offset += part.length;
+    return part;
   });
-  return { body: `{${parts.join('')}}`, index };
+  return { body: Buffer.concat(parts), index };
+}
+
+/** A pack's bundles, from either format. */
+function unpackBundles(body: Buffer, metadata: KvMetadata | null): BenchmarkBundle[] {
+  if (!metadata?.gzip) {
+    return Object.values(JSON.parse(body.toString('utf8')) as Record<string, BenchmarkBundle>);
+  }
+  return Object.values(metadata.index ?? {}).map(
+    ([start, end]) =>
+      JSON.parse(gunzipSync(body.subarray(start, end)).toString('utf8')) as BenchmarkBundle,
+  );
 }
 
 /** Where published data goes: Cloudflare KV, or the dev server's directory with `--local`. */
@@ -470,20 +482,26 @@ class Store {
 
   /** Writes `value` unless the store already holds the same content (ignoring `builtAt`). */
   async put(key: string, value: unknown, options: { always?: boolean } = {}) {
-    await this.write(key, JSON.stringify(value), contentHash(value), undefined, options.always);
+    await this.write(key, JSON.stringify(value), contentHash(value), {}, options.always);
   }
 
   /** Writes bundles as one pack (see `packKey`), unless unchanged. */
   async putPack(key: string, bundles: BenchmarkBundle[]) {
     const { body, index } = packBundles(bundles);
-    await this.write(key, body, contentHash(bundles), index);
+    await this.write(key, body, contentHash(bundles), { index, gzip: true });
+  }
+
+  /** The bundles in a pack; empty if there's none. */
+  async getPack(key: string): Promise<BenchmarkBundle[]> {
+    const body = await this.getRaw(key);
+    return body ? unpackBundles(body, await this.metadata(key)) : [];
   }
 
   private async write(
     key: string,
-    body: string,
+    body: string | Buffer,
     hash: string,
-    index: PackIndex | undefined,
+    extra: Pick<KvMetadata, 'index' | 'gzip'> = {},
     always = false,
   ) {
     const previous = await this.metadata(key);
@@ -491,14 +509,14 @@ class Store {
       stats.unchanged += 1;
       return;
     }
-    const metadata: KvMetadata = { hash, writtenAt: Date.now(), index };
+    const metadata: KvMetadata = { hash, writtenAt: Date.now(), ...extra };
     if (this.local) {
       fs.writeFileSync(path.join(LOCAL_DIR, `${key}.json`), body);
       fs.writeFileSync(path.join(LOCAL_DIR, `${key}.meta.json`), JSON.stringify(metadata));
     } else {
       // Metadata needs the multipart form of the API.
       const form = new FormData();
-      form.append('value', body);
+      form.append('value', typeof body === 'string' ? body : new Blob([new Uint8Array(body)]));
       form.append('metadata', JSON.stringify(metadata));
       const response = await fetch(
         `https://api.cloudflare.com/client/v4/accounts/${requireEnv('CLOUDFLARE_ACCOUNT_ID')}${this.valuePath(key)}?expiration_ttl=${KV_TTL_SECONDS}`,
@@ -537,9 +555,14 @@ class Store {
   }
 
   async get<T>(key: string): Promise<T | null> {
+    const body = await this.getRaw(key);
+    return body ? (JSON.parse(body.toString('utf8')) as T) : null;
+  }
+
+  private async getRaw(key: string): Promise<Buffer | null> {
     if (this.local) {
       const file = path.join(LOCAL_DIR, `${key}.json`);
-      return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as T) : null;
+      return fs.existsSync(file) ? fs.readFileSync(file) : null;
     }
     // KV values come back raw, not in Cloudflare's `{ result }` envelope.
     const response = await fetch(
@@ -552,7 +575,7 @@ class Store {
     if (!response.ok) {
       throw new Error(`Cloudflare GET ${key} failed: HTTP ${response.status}`);
     }
-    return (await response.json()) as T;
+    return Buffer.from(await response.arrayBuffer());
   }
 }
 
@@ -983,7 +1006,7 @@ async function buildSpec(
       const key = packKey(config.spec.id, difficulty);
       // Bosses this run doesn't rebuild (cut short, or `--encounter`) keep their earlier bundle.
       const pack = new Map(
-        Object.values((await store.get<Record<string, BenchmarkBundle>>(key)) ?? {})
+        (await store.getPack(key))
           .filter((bundle) => bundle.snapshotVersion === SNAPSHOT_VERSION)
           .map((bundle) => [bundle.encounterId, bundle]),
       );
@@ -1027,7 +1050,13 @@ async function buildSpec(
             .forEach((id) => pack.delete(id));
         }
         if (pack.size > 0) {
-          await store.putPack(key, [...pack.values()]);
+          try {
+            await store.putPack(key, [...pack.values()]);
+          } catch (err) {
+            // Still build the other difficulty; the spec stays incomplete, so it's retried.
+            failures += 1;
+            say(`${specName(config)}, difficulty ${difficulty}: ${(err as Error).message}`);
+          }
         }
       }
     }

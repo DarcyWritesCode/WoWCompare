@@ -16,17 +16,20 @@ const ROUTES = [
   { pattern: /^effects\/(\d+)$/, key: (m) => `effects-${m[1]}` },
 ];
 
-/** The route's value, or null; a pack is sliced by its index without parsing it. */
+/**
+ * The route's value, or null. A pack is sliced by its index without parsing it; in a gzipped pack
+ * each part is a gzip stream of its own, served as is for the browser to decompress.
+ */
 async function read(kv, route, m) {
   if (!route.part) {
-    return kv.get(route.key(m));
+    return { body: await kv.get(route.key(m)) };
   }
   const { value, metadata } = await kv.getWithMetadata(route.key(m), 'arrayBuffer');
   const range = metadata?.index?.[route.part(m)];
   if (value && range) {
-    return value.slice(range[0], range[1]);
+    return { body: value.slice(range[0], range[1]), gzip: metadata.gzip === true };
   }
-  return kv.get(route.fallback(m));
+  return { body: await kv.get(route.fallback(m)) };
 }
 /** Each entry changes at most daily (most weekly); let the edge and browsers reuse answers. */
 const CACHE_SECONDS = 3600;
@@ -40,14 +43,17 @@ export async function onRequest({ request, params, env }) {
   if (!route) {
     return new Response('Not found', { status: 404 });
   }
-  const value = env.SNAPSHOTS ? await read(env.SNAPSHOTS, route.r, route.m) : null;
-  if (!value) {
+  const { body, gzip } = env.SNAPSHOTS ? await read(env.SNAPSHOTS, route.r, route.m) : {};
+  if (!body) {
     return new Response('Not published', { status: 404 });
   }
-  return new Response(request.method === 'HEAD' ? null : value, {
+  return new Response(request.method === 'HEAD' ? null : body, {
     headers: {
       'content-type': 'application/json',
       'cache-control': `public, max-age=${CACHE_SECONDS}`,
+      ...(gzip && { 'content-encoding': 'gzip' }),
     },
+    // Already gzipped: without this the runtime would compress it again.
+    ...(gzip && { encodeBody: 'manual' }),
   });
 }
