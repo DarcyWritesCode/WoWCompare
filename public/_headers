@@ -1,0 +1,6 @@
+# Cross-origin isolation for Live Compare's in-browser sims: the SimC build is multi-threaded and
+# needs SharedArrayBuffer. credentialless (unlike require-corp) still loads cross-origin images
+# and scripts such as Wowhead's. Browsers without credentialless (Safari) simply can't sim.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless

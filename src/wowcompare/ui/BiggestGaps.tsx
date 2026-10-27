@@ -91,9 +91,23 @@ export default function BiggestGaps({
         ))}
       </ol>
       <p className="text-muted">
-        Estimated against {referenceLabel}, valuing each gap at your own damage (your casts, your
-        DoT damage). Gaps marked "not play" are gear and raid setup. Causes interact, so the total
-        is roughly, not exactly, their sum.
+        {mistakes.some(
+          (m) => m.key === 'setup' || m.key === 'talents' || m.key === 'other-play',
+        ) ? (
+          <>
+            Against {referenceLabel}. Gear, raid buffs and talents are simmed on your character; the
+            rest of the gap is play, broken down where it can be measured from the log (each valued
+            at your own damage), with "other play differences" for the remainder. Together they add
+            up to the gap, apart from items too small to list.
+          </>
+        ) : (
+          <>
+            Estimated against {referenceLabel}, valuing each gap at your own damage (your casts,
+            your DoT damage). Gaps marked "not play" are gear and raid setup, a rough estimate from
+            the logs until your character is simmed. Causes interact, so the total is roughly, not
+            exactly, their sum.
+          </>
+        )}
       </p>
     </>
   );

@@ -14,26 +14,43 @@ export interface RaidBuff {
   value: number;
   /** Applies only to these primary stats, or to magic or physical damage (scaled by its share). */
   appliesTo?: { stat?: string[]; school?: 'magic' | 'physical' };
+  /** SimC's `override.<name>=0` that removes it from a sim (SimC applies every raid buff otherwise). */
+  simcOverride: string;
 }
 
+/** The figures here are only used when a sim can't run; sims measure the buffs instead. */
 export const RAID_BUFFS: RaidBuff[] = [
-  { name: 'Chaos Brand', className: 'DemonHunter', value: 0.03, appliesTo: { school: 'magic' } },
-  { name: 'Mystic Touch', className: 'Monk', value: 0.05, appliesTo: { school: 'physical' } },
-  { name: 'Mark of the Wild', className: 'Druid', value: 0.03 },
+  {
+    name: 'Chaos Brand',
+    simcOverride: 'chaos_brand',
+    className: 'DemonHunter',
+    value: 0.03,
+    appliesTo: { school: 'magic' },
+  },
+  {
+    name: 'Mystic Touch',
+    simcOverride: 'mystic_touch',
+    className: 'Monk',
+    value: 0.05,
+    appliesTo: { school: 'physical' },
+  },
+  { name: 'Mark of the Wild', simcOverride: 'mark_of_the_wild', className: 'Druid', value: 0.03 },
   {
     name: 'Arcane Intellect',
+    simcOverride: 'arcane_intellect',
     className: 'Mage',
     value: 0.03,
     appliesTo: { stat: [PRIMARY_STAT.INTELLECT] },
   },
   {
     name: 'Battle Shout',
+    simcOverride: 'battle_shout',
     className: 'Warrior',
     value: 0.04,
     appliesTo: { stat: [PRIMARY_STAT.AGILITY, PRIMARY_STAT.STRENGTH] },
   },
-  { name: 'Skyfury', className: 'Shaman', value: 0.015 },
-  { name: "Hunter's Mark", className: 'Hunter', value: 0.01 },
+  { name: 'Skyfury', simcOverride: 'skyfury', className: 'Shaman', value: 0.015 },
+  { name: "Hunter's Mark", simcOverride: 'hunters_mark', className: 'Hunter', value: 0.01 },
 ];
 
 /** The raid buffs a player's raid lacked, with what each is worth to them. */
@@ -53,3 +70,7 @@ export function missingRaidBuffs(raid: {
     return share > 0.05 ? [{ name: buff.name, value: buff.value * share }] : [];
   });
 }
+
+/** Raid buffs whose class wasn't in the raid, regardless of whether they'd help this player. */
+export const absentRaidBuffs = (classes: string[]) =>
+  RAID_BUFFS.filter((buff) => !classes.includes(buff.className));

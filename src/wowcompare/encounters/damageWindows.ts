@@ -21,6 +21,8 @@ export interface DamageWindowDef {
   multiplier: number;
   /** Shares health with the boss, so damage to it counts toward the kill. */
   sharedHealth?: boolean;
+  /** The aura is on a boss itself (not an add): sims model it as the boss taking more damage. */
+  onBoss?: boolean;
   /** What to tell the player, in a few words. */
   advice: string;
 }
@@ -32,6 +34,7 @@ export const DAMAGE_WINDOWS: Record<number, DamageWindowDef[]> = {
       auraId: 1286033,
       name: 'Dig In',
       kind: 'amp',
+      onBoss: true,
       multiplier: 1.3,
       advice: 'Sszorak takes 30% more damage while he digs in during Howling Maelstrom.',
     },
@@ -42,6 +45,7 @@ export const DAMAGE_WINDOWS: Record<number, DamageWindowDef[]> = {
       auraId: 1304033,
       name: 'Ghastly Regeneration',
       kind: 'amp',
+      onBoss: true,
       multiplier: 2,
       advice: "Zul'jan takes double damage while he regenerates; Malacrass is shielded meanwhile.",
     },

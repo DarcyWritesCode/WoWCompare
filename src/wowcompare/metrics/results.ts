@@ -259,6 +259,11 @@ export interface LogSnapshot {
   pullStats?: { primary: number };
   /** Who else was in the raid, for raid buffs (benchmarks/raidBuffs.ts). Absent from older bundles. */
   raid?: { classes: string[]; primaryStat?: string; magicShare: number };
+  /**
+   * Share of the time alive spent casting or on the global cooldown (WoWAnalyzer's
+   * AlwaysBeCasting). Absent from older bundles.
+   */
+  activeTime?: number;
   /** Time the player was alive in the fight. Absent from older bundles. */
   aliveMs?: number;
   /** DPS over the whole fight, per `bucketMs` from the pull. Absent from older bundles. */

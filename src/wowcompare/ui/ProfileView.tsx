@@ -21,6 +21,9 @@ import {
   useDamageWindowSpans,
 } from '../damageWindows';
 import { useDeathCutoffState } from '../deathCutoff';
+import type { SimCharacter } from '../sim/profileFromLog';
+import { autoSim, canSim, preloadEngine } from '../sim/runner';
+import { useSimGaps } from '../sim/variants';
 import AplExpectations from './AplExpectations';
 import BenchmarkLogList from './BenchmarkLogList';
 import BenchmarkTable from './BenchmarkTable';
@@ -32,6 +35,7 @@ import DamageWindows from './DamageWindows';
 import DeathCutoffControl from './DeathCutoffControl';
 import FightTimelines from './FightTimelines';
 import ProfileResultsTable, { STATUS_COLORS } from './ProfileResultsTable';
+import SimGaps from './SimGaps';
 import Suggestions from './Suggestions';
 import TalentComparison from './TalentComparison';
 import { DEFAULT_NORMALIZATION, DPS_PER_ILVL, headline, Normalization } from './normalize';
@@ -273,6 +277,7 @@ export default function ProfileView({
   snapshot,
   benchmarkInputs,
   damageWindowInputs,
+  simCharacter,
 }: {
   profile: Profile;
   /** SimC tokens the profile builder couldn't map to spells. */
@@ -282,6 +287,8 @@ export default function ProfileView({
   benchmarkInputs: Omit<BenchmarkInputs, 'playerResults'> | undefined;
   /** Undefined on encounters without damage windows. */
   damageWindowInputs?: DamageWindowInputs;
+  /** The player's character for in-browser sims. */
+  simCharacter?: SimCharacter;
 }) {
   // A fight cut this short (by the death cutoff) has too little to compare.
   const tooShort = useDeathCutoffState().applied !== null && snapshot.durationMs < MIN_CUT_MS;
@@ -318,6 +325,12 @@ export default function ProfileView({
     }
   };
   const windowFetch = useDamageWindowSpans(damageWindowInputs);
+  // Start the engine download now, so it's ready by the time the reference logs are.
+  useEffect(() => {
+    if (simCharacter && canSim() && autoSim()) {
+      preloadEngine();
+    }
+  }, [simCharacter]);
   const windowAnalysis = useMemo(
     () =>
       windowFetch?.state === 'done' && damageWindowInputs
@@ -358,12 +371,52 @@ export default function ProfileView({
       compareTalents(talents.pool, talents.top, snapshot.build.talents, talentTree),
     [talents, snapshot, talentTree],
   );
+  // Damage amp windows on the boss (or a target sharing its health) go into the sim's fight.
+  const simWindowsReady = !damageWindowInputs || windowFetch?.state !== 'loading';
+  const simFight = useMemo(
+    () =>
+      simCharacter && {
+        ...simCharacter,
+        fight: {
+          ...simCharacter.fight,
+          vulnerable: (windowAnalysis?.amps ?? [])
+            .filter((amp) => amp.def.onBoss || amp.def.sharedHealth)
+            .map((amp) => ({
+              start: amp.startMs / 1000,
+              duration: (amp.endMs - amp.startMs) / 1000,
+              multiplier: amp.def.multiplier,
+            })),
+        },
+      },
+    [simCharacter, windowAnalysis],
+  );
+  const simInputs = useMemo(
+    () =>
+      simFight && simWindowsReady && talentTree && talents && reference
+        ? {
+            character: simFight,
+            tree: talentTree,
+            builds: talents.top.length > 0 ? talents.top : talents.pool,
+            playerIlvl: snapshot.ilvl,
+            referenceIlvl: reference.ilvl,
+            raidClasses: snapshot.raid?.classes ?? [],
+          }
+        : null,
+    [simFight, simWindowsReady, talentTree, talents, reference, snapshot],
+  );
+  const sims = useSimGaps(simInputs);
+  const simResults = sims.results;
   // Estimates against the #1 parse alone swing wildly (one log's windows), so they wait for the
   // reference logs, unless they can't load at all.
   const mistakesReady = loaded.includes('reference') || (!busy && reference !== null);
+  // While the sims run, or their inputs (talents, the reference) are still loading, the gaps wait
+  // for them rather than show the rougher log-only estimates first.
+  const simPending =
+    sims.pending ||
+    (!!simCharacter && !simInputs && busy && canSim() && autoSim() && sims.run.state !== 'error');
   const mistakes = useMemo(
     () =>
-      reference && mistakesReady
+      reference && mistakesReady && !simPending
         ? biggestMistakes(
             profile,
             snapshot,
@@ -371,9 +424,20 @@ export default function ProfileView({
             effects,
             windowAnalysis,
             talentComparison,
+            simResults,
           )
         : null,
-    [profile, snapshot, reference, mistakesReady, effects, windowAnalysis, talentComparison],
+    [
+      profile,
+      snapshot,
+      reference,
+      mistakesReady,
+      simPending,
+      effects,
+      windowAnalysis,
+      talentComparison,
+      simResults,
+    ],
   );
 
   const moreButtons = available.length > 0 && (
@@ -457,6 +521,21 @@ export default function ProfileView({
         )}
       </Panel>
 
+      {simCharacter && sims.plan && (
+        <Panel
+          title="Sim your gaps"
+          explanation="What your talents and item level are worth on your own character, simulated with SimulationCraft in your browser."
+        >
+          <SimGaps
+            character={simCharacter}
+            plan={sims.plan!}
+            run={sims.run}
+            start={sims.start}
+            playerDps={snapshot.fightDps}
+          />
+        </Panel>
+      )}
+
       {reference && (
         <Panel
           title="Biggest gaps"
@@ -469,7 +548,11 @@ export default function ProfileView({
               referenceLabel={reference.label}
             />
           ) : (
-            <p className="text-muted">Estimates appear once the reference logs have loaded.</p>
+            <p className="text-muted">
+              {simPending
+                ? 'Estimates appear once your character is simmed (see Sim your gaps).'
+                : 'Estimates appear once the reference logs have loaded.'}
+            </p>
           )}
         </Panel>
       )}

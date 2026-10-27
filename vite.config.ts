@@ -12,6 +12,7 @@ import svgr from 'vite-plugin-svgr';
 import checker from 'vite-plugin-checker';
 
 import publishedDataPlugin from './vite/publishedDataPlugin';
+import simcPlugin from './vite/simcPlugin';
 
 const GOOGLE_ANALYTICS_SCRIPT = `
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-MW95W6NHVC"></script>
@@ -73,6 +74,7 @@ export default defineConfig((env) => ({
   },
   plugins: [
     publishedDataPlugin(),
+    simcPlugin(),
     react(),
     lingui(),
     babel({
@@ -128,6 +130,12 @@ export default defineConfig((env) => ({
     // server to keep requests same-origin when the app is opened under another hostname.
     proxy: {
       '/i/': { target: 'https://wowanalyzer.com', changeOrigin: true },
+    },
+    // Cross-origin isolation, which the multi-threaded SimC build needs (SharedArrayBuffer).
+    // credentialless, unlike require-corp, still loads cross-origin images such as Wowhead icons.
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
     },
     watch: {
       ignored: ['**/.direnv/**'],

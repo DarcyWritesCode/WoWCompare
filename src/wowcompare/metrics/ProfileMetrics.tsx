@@ -9,16 +9,19 @@ import BuffMetrics from './BuffMetrics';
 import ConditionRules from './ConditionRules';
 import CooldownMetrics from './CooldownMetrics';
 import DamageTimeline from './DamageTimeline';
+import AlwaysBeCasting from 'parser/shared/modules/AlwaysBeCasting';
 import DeathTracker from 'parser/shared/modules/DeathTracker';
 import Enemies from 'parser/shared/modules/Enemies';
 
 import { simcToken } from '../simc/resolve';
 import { mergeIntervals, totalDuration, windowThroughput } from './intervals';
 import BLOODLUST_BUFFS from 'game/BLOODLUST_BUFFS';
+import GEAR_SLOTS from 'game/GEAR_SLOTS';
 
 import { DAMAGE_POTION_IDS, DAMAGE_POTION_NAMES, EXTERNAL_BUFF_IDS } from '../benchmarks/reference';
 import { DamageWindowInputs } from '../damageWindows';
 import { DAMAGE_WINDOWS } from '../encounters/damageWindows';
+import { fightModel, SIMC_SLOTS, SimCharacter, simcClassToken } from '../sim/profileFromLog';
 import {
   AbilityTotal,
   AuraUsage,
@@ -37,6 +40,7 @@ class ProfileMetrics extends Analyzer {
     buffMetrics: BuffMetrics,
     cooldownMetrics: CooldownMetrics,
     conditionRules: ConditionRules,
+    alwaysBeCasting: AlwaysBeCasting,
     damageTimeline: DamageTimeline,
     deathTracker: DeathTracker,
     enemies: Enemies,
@@ -46,6 +50,7 @@ class ProfileMetrics extends Analyzer {
   protected conditionRules!: ConditionRules;
   protected damageTimeline!: DamageTimeline;
   protected deathTracker!: DeathTracker;
+  protected alwaysBeCasting!: AlwaysBeCasting;
   protected enemies!: Enemies;
 
   private readonly profile: Profile | undefined;
@@ -109,6 +114,41 @@ class ProfileMetrics extends Analyzer {
       hits: this.damageTimeline.damage,
       casts: this.damageTimeline.casts,
       enemies: Object.fromEntries(report.enemies.map((enemy) => [enemy.id, enemy.name])),
+    };
+  }
+
+  /** The player's character for sims (sim/profileFromLog.ts). */
+  private get simCharacter(): SimCharacter {
+    const slotNames = Object.keys(GEAR_SLOTS) as (keyof typeof GEAR_SLOTS)[];
+    const gear = SIMC_SLOTS.flatMap((slot, index) => {
+      const item = slot ? this.selectedCombatant.getGear(slotNames[index]) : undefined;
+      if (!slot || !item?.id) {
+        return [];
+      }
+      const bonusIds = item.bonusIDs === undefined ? [] : [item.bonusIDs].flat();
+      return [
+        {
+          slot,
+          id: item.id,
+          itemLevel: item.itemLevel,
+          bonusIds,
+          gemIds: (item.gems ?? []).map((gem) => gem.id),
+          enchantId: item.permanentEnchant || undefined,
+        },
+      ];
+    });
+    const { spec } = this.owner.config;
+    return {
+      classToken: simcClassToken(spec.wclClassName),
+      specToken: simcClassToken(spec.wclSpecName),
+      talents: this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`),
+      gear,
+      fightSeconds: (this.owner.fight.end_time - this.owner.fight.start_time) / 1000,
+      fight: fightModel(
+        this.damageTimeline.damage,
+        this.owner.fight.start_time,
+        this.owner.fight.end_time,
+      ),
     };
   }
 
@@ -282,6 +322,7 @@ class ProfileMetrics extends Analyzer {
     const heroTree = this.profile?.heroTrees?.find((tree) =>
       talents.some((t) => t.startsWith(`${tree.keystoneEntryId}:`)),
     )?.name;
+    const aliveMs = Math.max(0, durationMs - this.deathTracker.totalTimeDead);
     const comp = { tank: 0, healer: 0, dps: 0 };
     this.owner.playerDetails.forEach((player) => (comp[player.role] += 1));
     return {
@@ -311,7 +352,8 @@ class ProfileMetrics extends Analyzer {
             : 0,
       },
       bossHp: this.damageTimeline.maxEnemyHp || undefined,
-      aliveMs: Math.max(0, durationMs - this.deathTracker.totalTimeDead),
+      aliveMs,
+      activeTime: aliveMs > 0 ? Math.min(1, this.alwaysBeCasting.activeTime / aliveMs) : undefined,
       timeline: this.timeline(),
       lust: this.buffSpans((aura) => aura.guid in BLOODLUST_BUFFS),
       potions: this.buffSpans(
@@ -337,6 +379,7 @@ class ProfileMetrics extends Analyzer {
           snapshot={snapshot}
           benchmarkInputs={this.benchmarkProps}
           damageWindowInputs={this.damageWindowInputs}
+          simCharacter={this.simCharacter}
         />
       ),
     };

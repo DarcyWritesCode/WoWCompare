@@ -2,7 +2,7 @@ import { formatDuration, formatNumber } from 'common/format';
 import Config from 'parser/Config';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { medianResults, rescoreAgainst } from '../benchmarks/aggregate';
+import { median as medianOf, medianResults, rescoreAgainst } from '../benchmarks/aggregate';
 import { parseBenchmarkLog } from '../benchmarks/parseLog';
 import { BuffEffects } from '../benchmarks/buffEffects';
 import {
@@ -136,6 +136,8 @@ export interface BenchmarkReference {
   logs: LogSnapshot[];
   /** Metric-by-metric medians of `logs`. */
   results: ProfileResults;
+  /** Median item level of the reference parses, from the rankings (Warcraft Logs' measure). */
+  ilvl: number | null;
 }
 
 function parsesFor(selection: BenchmarkSelection, kind: BenchmarkKind): RankedParse[] {
@@ -390,6 +392,9 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
             ? describeParse(selection.top)
             : '',
       logs: referenceLogs,
+      ilvl: medianOf(
+        (useBand ? pick.picked : selection.top ? [selection.top] : []).map((parse) => parse.ilvl),
+      ),
       results: referenceResults,
     };
     const rescore = (column: BenchmarkColumn): BenchmarkColumn => ({

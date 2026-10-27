@@ -75,8 +75,9 @@ const KV_TTL_SECONDS = 21 * 24 * 60 * 60;
  * cached logs are parsed again without invalidating published data (`SNAPSHOT_VERSION`).
  * 3: fight timelines (DPS, Bloodlust, potions, damage windows, cooldown casts).
  * 4: time alive, primary stat at the pull, raid classes and Warcraft Logs' item level.
+ * 5: active time.
  */
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 /** Buff effects use at most this many of a spec's most recent logs, collected in this period. */
 const EFFECT_LOGS_PER_SPEC = 3000;
 const EFFECT_ROW_MAX_AGE_MS = 28 * 24 * 60 * 60 * 1000;
