@@ -13,6 +13,7 @@
     "/src/interface/static/bootstrap",
     "CHANGELOG.tsx",
     "CHANGELOG.js",
-    "pnpm-lock.yaml"
+    "pnpm-lock.yaml",
+    "/src/wowcompare/talentTrees/*.json"
   ]
 }

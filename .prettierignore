@@ -7,3 +7,4 @@ CHANGELOG.tsx
 CHANGELOG.js
 pnpm-lock.yaml
 /scripts/lint-baseline/baseline.json
+/src/wowcompare/talentTrees/*.json

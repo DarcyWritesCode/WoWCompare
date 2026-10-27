@@ -1,5 +1,4 @@
 import { formatDuration, formatNumber } from 'common/format';
-import getTalentFromEntry from 'common/TALENTS/getTalentFromEntry';
 import { Panel } from 'interface';
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 
@@ -7,7 +6,8 @@ import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
 import { AUGMENTATION_MIN_UPTIME, POWER_INFUSION_MIN_UPTIME } from '../benchmarks/reference';
 import { CLOSE_COUNT } from '../benchmarks/select';
-import { compareTalents } from '../benchmarks/talents';
+import { compareTalents, TalentTree } from '../benchmarks/talents';
+import { loadTalentTree } from '../talentTrees';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
 import { useDeathCutoffState } from '../deathCutoff';
@@ -303,17 +303,20 @@ export default function ProfileView({
     }
   };
   const source = profile.source;
+  const [talentTree, setTalentTree] = useState<TalentTree | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadTalentTree(profile.specId).then((tree) => !cancelled && setTalentTree(tree));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.specId]);
   const talentComparison = useMemo(
     () =>
       talents &&
-      compareTalents(
-        talents.pool,
-        talents.top,
-        snapshot.build.talents,
-        profile.heroTrees,
-        (id) => getTalentFromEntry({ id }) !== undefined,
-      ),
-    [talents, snapshot, profile],
+      talentTree &&
+      compareTalents(talents.pool, talents.top, snapshot.build.talents, talentTree),
+    [talents, snapshot, talentTree],
   );
   // Estimates against the #1 parse alone swing wildly (one log's windows), so they wait for the
   // reference logs, unless they can't load at all.
@@ -411,7 +414,7 @@ export default function ProfileView({
           title="Talents"
           explanation="Where your talents differ from what ranked players of your spec take on this boss."
         >
-          <TalentComparison comparison={talentComparison} />
+          <TalentComparison comparison={talentComparison} tree={talentTree!} />
         </Panel>
       )}
 
