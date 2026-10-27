@@ -108,6 +108,8 @@ function runs(values: number[]) {
 
 /** The player's own bands: on or off. */
 const OWN_BAND_OPACITY = 0.5;
+/** The player's cooldowns, translucent so the bands under them still show. */
+const OWN_COOLDOWN_OPACITY = 0.8;
 /** Reference bands and cooldowns: one log barely shows, every log is near solid. */
 const shareOpacity = (share: number) => 0.08 + 0.82 * share;
 
@@ -287,7 +289,7 @@ function CooldownChart({
               width={(to - from) * w}
               height={ROW_HEIGHT * 0.6}
               fill={CHART_COLORS.you}
-              opacity={logs === undefined ? 1 : shareOpacity(share)}
+              opacity={logs === undefined ? OWN_COOLDOWN_OPACITY : shareOpacity(share)}
             />
           ))}
         </Frame>
