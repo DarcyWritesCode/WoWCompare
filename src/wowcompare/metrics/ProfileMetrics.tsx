@@ -9,6 +9,7 @@ import BuffMetrics from './BuffMetrics';
 import ConditionRules from './ConditionRules';
 import CooldownMetrics from './CooldownMetrics';
 import DamageTimeline from './DamageTimeline';
+import DeathTracker from 'parser/shared/modules/DeathTracker';
 import Enemies from 'parser/shared/modules/Enemies';
 
 import { simcToken } from '../simc/resolve';
@@ -37,12 +38,14 @@ class ProfileMetrics extends Analyzer {
     cooldownMetrics: CooldownMetrics,
     conditionRules: ConditionRules,
     damageTimeline: DamageTimeline,
+    deathTracker: DeathTracker,
     enemies: Enemies,
   };
   protected buffMetrics!: BuffMetrics;
   protected cooldownMetrics!: CooldownMetrics;
   protected conditionRules!: ConditionRules;
   protected damageTimeline!: DamageTimeline;
+  protected deathTracker!: DeathTracker;
   protected enemies!: Enemies;
 
   private readonly profile: Profile | undefined;
@@ -225,6 +228,16 @@ class ProfileMetrics extends Analyzer {
     }));
   }
 
+  /** Primary stat at the pull. */
+  private pullStats(): LogSnapshot['pullStats'] {
+    const stats = this.selectedCombatant.pullStats;
+    const primaryStat = this.owner.config.spec.primaryStat;
+    if (!stats || !primaryStat) {
+      return undefined;
+    }
+    return { primary: stats[primaryStat] };
+  }
+
   /** DPS per `TIMELINE_BUCKET_MS` over the whole fight, rounded. */
   private timeline(): LogSnapshot['timeline'] {
     const start = this.owner.fight.start_time;
@@ -282,8 +295,23 @@ class ProfileMetrics extends Analyzer {
       externalBuffs: this.externalBuffs(),
       windows: this.cooldownMetrics.active ? this.cooldownMetrics.windowTimelines() : [],
       fightDps: durationMs > 0 ? (damage / durationMs) * 1000 : 0,
-      ilvl: this.selectedCombatant.ilvl,
+      // Warcraft Logs' item level: Combatant.ilvl averages every slot, shirt and tabard included.
+      ilvl:
+        this.owner.playerDetails.find((p) => p.id === this.owner.playerId)?.ilvl ??
+        this.selectedCombatant.ilvl,
+      pullStats: this.pullStats(),
+      raid: {
+        classes: [...new Set(this.owner.playerDetails.map((p) => p.className))],
+        primaryStat: this.owner.config.spec.primaryStat,
+        magicShare:
+          damage > 0
+            ? this.damageTimeline.damage
+                .filter((hit) => hit.school !== 1)
+                .reduce((sum, hit) => sum + hit.amount, 0) / damage
+            : 0,
+      },
       bossHp: this.damageTimeline.maxEnemyHp || undefined,
+      aliveMs: Math.max(0, durationMs - this.deathTracker.totalTimeDead),
       timeline: this.timeline(),
       lust: this.buffSpans((aura) => aura.guid in BLOODLUST_BUFFS),
       potions: this.buffSpans(

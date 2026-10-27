@@ -12,6 +12,8 @@ class DamageTimeline extends Analyzer {
     spellId: number;
     targetID: number;
     targetInstance?: number;
+    /** Spell school bitmask; 1 is physical. */
+    school: number;
   }[] = [];
   readonly casts: {
     timestamp: number;
@@ -62,6 +64,7 @@ class DamageTimeline extends Analyzer {
       spellId: event.ability.guid,
       targetID: event.targetID,
       targetInstance: event.targetInstance,
+      school: event.ability.type,
     });
   }
 }

@@ -238,23 +238,37 @@ export function DpsStrip({
 export function ImpactBar({
   fraction,
   color = CHART_COLORS.loss,
+  segments,
 }: {
   fraction: number;
   color?: string;
+  /** Splits the filled part: each segment's share of it and colour, in order. */
+  segments?: { share: number; color: string; title?: string }[];
 }) {
+  const parts = segments ?? [{ share: 1, color }];
   return (
     <div
       className="wc-track-fill"
-      style={{ height: 6, ...fill(CHART_COLORS.track), borderRadius: 2, marginTop: 4 }}
+      style={{
+        height: 6,
+        ...fill(CHART_COLORS.track),
+        borderRadius: 2,
+        marginTop: 4,
+        display: 'flex',
+        overflow: 'hidden',
+      }}
     >
-      <div
-        style={{
-          width: `${clamp(fraction) * 100}%`,
-          height: '100%',
-          ...fill(color),
-          borderRadius: 2,
-        }}
-      />
+      {parts.map((part, i) => (
+        <div
+          key={i}
+          title={part.title}
+          style={{
+            width: `${clamp(fraction) * part.share * 100}%`,
+            height: '100%',
+            ...fill(part.color),
+          }}
+        />
+      ))}
     </div>
   );
 }

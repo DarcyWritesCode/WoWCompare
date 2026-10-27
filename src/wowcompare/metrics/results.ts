@@ -251,10 +251,16 @@ export interface LogSnapshot {
   externalBuffs: ExternalBuff[];
   windows: CooldownWindowSet[];
   fightDps: number;
-  /** Average equipped item level. */
+  /** Item level as Warcraft Logs reports it. */
   ilvl?: number;
   /** The boss's max HP (the largest enemy the player hit). */
   bossHp?: number;
+  /** The player's primary stat at the pull. Absent from older bundles. */
+  pullStats?: { primary: number };
+  /** Who else was in the raid, for raid buffs (benchmarks/raidBuffs.ts). Absent from older bundles. */
+  raid?: { classes: string[]; primaryStat?: string; magicShare: number };
+  /** Time the player was alive in the fight. Absent from older bundles. */
+  aliveMs?: number;
   /** DPS over the whole fight, per `bucketMs` from the pull. Absent from older bundles. */
   timeline?: { bucketMs: number; dps: number[] };
   /** Bloodlust (any source) on the player: [start, end] ms from the pull. */

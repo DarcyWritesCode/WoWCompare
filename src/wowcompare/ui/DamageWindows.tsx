@@ -1,14 +1,7 @@
 import { formatDuration, formatNumber } from 'common/format';
 import { SpellIcon, SpellLink } from 'interface';
-import { useMemo } from 'react';
 
-import {
-  AmpWindowResult,
-  analyzeDamageWindows,
-  DamageWindowInputs,
-  WindowFetch,
-} from '../damageWindows';
-import { LogSnapshot } from '../metrics/results';
+import { AmpWindowResult, DamageWindowAnalysis, WindowFetch } from '../damageWindows';
 import { CHART_COLORS, fill, tint } from './charts';
 
 const COLORS = {
@@ -63,22 +56,14 @@ function SplitBar({ amp, max }: { amp: AmpWindowResult; max: number }) {
  * less (hold cooldowns), and how this player used them.
  */
 export default function DamageWindows({
-  inputs,
   fetched,
-  snapshot,
+  analysis,
 }: {
-  inputs: DamageWindowInputs;
-  /** The window auras (useDamageWindowSpans), shared with the fight timelines. */
+  /** The window auras (useDamageWindowSpans), for the loading and error states. */
   fetched: WindowFetch | null;
-  snapshot: LogSnapshot;
+  /** analyzeDamageWindows of them, shared with the biggest gaps. */
+  analysis: DamageWindowAnalysis | null;
 }) {
-  const analysis = useMemo(
-    () =>
-      fetched?.state === 'done'
-        ? analyzeDamageWindows(inputs, fetched.spans, snapshot.windows, snapshot.results)
-        : null,
-    [fetched, inputs, snapshot],
-  );
   if (!fetched) {
     return null;
   }

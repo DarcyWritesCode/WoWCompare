@@ -14,12 +14,17 @@ import { compareTalents, TalentTree } from '../benchmarks/talents';
 import { loadTalentTree } from '../talentTrees';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
-import { DamageWindowInputs, mergeSpans, useDamageWindowSpans } from '../damageWindows';
+import {
+  analyzeDamageWindows,
+  DamageWindowInputs,
+  mergeSpans,
+  useDamageWindowSpans,
+} from '../damageWindows';
 import { useDeathCutoffState } from '../deathCutoff';
 import AplExpectations from './AplExpectations';
 import BenchmarkLogList from './BenchmarkLogList';
 import BenchmarkTable from './BenchmarkTable';
-import BiggestMistakes from './BiggestMistakes';
+import BiggestGaps from './BiggestGaps';
 import { CHART_COLORS, DpsStrip, StatTile } from './charts';
 import CooldownDamage from './CooldownDamage';
 import CooldownEntry from './CooldownEntry';
@@ -183,7 +188,8 @@ function Summary({
   ].filter(Boolean);
   const scaledNote = adjusted.length > 0 ? `scaled to your ${adjusted.join(' and ')}` : null;
   const counts = statusCounts(results);
-  const worst = mistakes?.[0];
+  const playGaps = mistakes?.filter((m) => !m.notPlay) ?? null;
+  const worst = playGaps?.[0];
 
   return (
     <>
@@ -231,12 +237,12 @@ function Summary({
               "Some of the gap is gear, raid comp and kill time, which play can't close; the checkboxes above take those out."}{' '}
           </>
         )}
-        {!mistakes ? (
-          <>DPS estimates for each mistake appear once the reference logs have loaded.</>
-        ) : mistakes.length > 0 ? (
+        {!playGaps ? (
+          <>DPS estimates for each gap appear once the reference logs have loaded.</>
+        ) : playGaps.length > 0 ? (
           <>
             The gaps that play can close start with{' '}
-            {names(mistakes.slice(0, 3).map((m) => <strong key={m.key}>{m.title}</strong>))}; the
+            {names(playGaps.slice(0, 3).map((m) => <strong key={m.key}>{m.title}</strong>))}; the
             list below puts a DPS figure on each.
           </>
         ) : (
@@ -312,6 +318,18 @@ export default function ProfileView({
     }
   };
   const windowFetch = useDamageWindowSpans(damageWindowInputs);
+  const windowAnalysis = useMemo(
+    () =>
+      windowFetch?.state === 'done' && damageWindowInputs
+        ? analyzeDamageWindows(
+            damageWindowInputs,
+            windowFetch.spans,
+            snapshot.windows,
+            snapshot.results,
+          )
+        : null,
+    [windowFetch, damageWindowInputs, snapshot],
+  );
   const playerAmpWindows = useMemo(
     () =>
       windowFetch?.state === 'done' && damageWindowInputs
@@ -346,9 +364,16 @@ export default function ProfileView({
   const mistakes = useMemo(
     () =>
       reference && mistakesReady
-        ? biggestMistakes(profile, snapshot, reference.logs, effects)
+        ? biggestMistakes(
+            profile,
+            snapshot,
+            reference.logs,
+            effects,
+            windowAnalysis,
+            talentComparison,
+          )
         : null,
-    [profile, snapshot, reference, mistakesReady, effects],
+    [profile, snapshot, reference, mistakesReady, effects, windowAnalysis, talentComparison],
   );
 
   const moreButtons = available.length > 0 && (
@@ -427,18 +452,18 @@ export default function ProfileView({
         {damageWindowInputs && (
           <>
             <h4 style={{ marginTop: 24 }}>Damage windows</h4>
-            <DamageWindows inputs={damageWindowInputs} fetched={windowFetch} snapshot={snapshot} />
+            <DamageWindows fetched={windowFetch} analysis={windowAnalysis} />
           </>
         )}
       </Panel>
 
       {reference && (
         <Panel
-          title="Biggest mistakes"
-          explanation={`What play would close against ${reference.label}, largest first.`}
+          title="Biggest gaps"
+          explanation={`What separates you from ${reference.label}, largest first: what play can close, and what it can't.`}
         >
           {mistakes ? (
-            <BiggestMistakes
+            <BiggestGaps
               mistakes={mistakes}
               fightDps={snapshot.fightDps}
               referenceLabel={reference.label}
