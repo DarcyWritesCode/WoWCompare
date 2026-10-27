@@ -41,6 +41,7 @@ import { isMythicPlus } from 'common/isMythicPlus';
 import { useSelectedPull } from './DungeonPullList';
 import { useWaDispatch } from 'interface/utils/useWaDispatch';
 import { setPull, clearPull } from 'interface/reducers/navigation';
+import { useDeathCutoffFilter } from 'wowcompare/deathCutoff';
 
 const UnsupportedSpecBouncer = ({ report, fight }: { report: Report; fight: WCLFight }) => (
   <main className="container offset">
@@ -229,6 +230,10 @@ const ResultsLoader = () => {
     [fight.end_time, fight.start_time],
   );
 
+  // WoWCompare: "ignore events after N deaths" (src/wowcompare/deathCutoff.ts) in raids, unless a
+  // time filter was picked by hand.
+  const deathCutoff = useDeathCutoffFilter(report.code, fight, !isMythicPlus(fight));
+
   const {
     isLoading: isFilteringEvents,
     events: filteredEvents,
@@ -236,7 +241,7 @@ const ResultsLoader = () => {
   } = useTimeEventFilter({
     bossPhaseEventsLoaded: bossPhaseEventsLoadingState !== BOSS_PHASES_STATE.LOADING,
     fight,
-    filter: timeFilter!,
+    filter: (timeFilter ?? deathCutoff)!,
     phase: selectedPhase,
     bossPhaseEvents,
     events,

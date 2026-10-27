@@ -1,4 +1,5 @@
 import { formatDuration, formatNumber } from 'common/format';
+import getTalentFromEntry from 'common/TALENTS/getTalentFromEntry';
 import { Panel } from 'interface';
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 
@@ -6,8 +7,10 @@ import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
 import { AUGMENTATION_MIN_UPTIME, POWER_INFUSION_MIN_UPTIME } from '../benchmarks/reference';
 import { CLOSE_COUNT } from '../benchmarks/select';
+import { compareTalents } from '../benchmarks/talents';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
+import { useDeathCutoffState } from '../deathCutoff';
 import AplExpectations from './AplExpectations';
 import BenchmarkLogList from './BenchmarkLogList';
 import BenchmarkTable from './BenchmarkTable';
@@ -15,8 +18,10 @@ import BiggestMistakes from './BiggestMistakes';
 import { CHART_COLORS, DpsStrip, StatTile } from './charts';
 import CooldownDamage from './CooldownDamage';
 import CooldownEntry from './CooldownEntry';
+import DeathCutoffControl from './DeathCutoffControl';
 import ProfileResultsTable, { STATUS_COLORS } from './ProfileResultsTable';
 import Suggestions from './Suggestions';
+import TalentComparison from './TalentComparison';
 import { DEFAULT_NORMALIZATION, DPS_PER_ILVL, headline, Normalization } from './normalize';
 import useBenchmarks, { BenchmarkInputs, BenchmarkKind, BenchmarkReference } from './useBenchmarks';
 import WindowReels from './WindowReels';
@@ -29,6 +34,8 @@ const LOAD_HINTS: Partial<Record<BenchmarkKind, string>> = {
 };
 
 const NORMALIZATION_KEY = 'wowcompare:normalization';
+/** Shortest fight the death cutoff can leave that still gets benchmarks. */
+const MIN_CUT_MS = 30_000;
 
 function readNormalization(): Normalization {
   try {
@@ -261,9 +268,14 @@ export default function ProfileView({
   /** Undefined outside boss fights, where there are no rankings to compare against. */
   benchmarkInputs: Omit<BenchmarkInputs, 'playerResults'> | undefined;
 }) {
+  // A fight cut this short (by the death cutoff) has too little to compare.
+  const tooShort = useDeathCutoffState().applied !== null && snapshot.durationMs < MIN_CUT_MS;
   const inputs = useMemo(
-    () => benchmarkInputs && { ...benchmarkInputs, playerResults: snapshot.results },
-    [benchmarkInputs, snapshot],
+    () =>
+      benchmarkInputs && !tooShort
+        ? { ...benchmarkInputs, playerResults: snapshot.results }
+        : undefined,
+    [benchmarkInputs, snapshot, tooShort],
   );
   const [normalization, setNormalizationState] = useState(readNormalization);
   const {
@@ -273,6 +285,7 @@ export default function ProfileView({
     loaded,
     available,
     poolSize,
+    talents,
     effects,
     columns,
     logs,
@@ -290,6 +303,18 @@ export default function ProfileView({
     }
   };
   const source = profile.source;
+  const talentComparison = useMemo(
+    () =>
+      talents &&
+      compareTalents(
+        talents.pool,
+        talents.top,
+        snapshot.build.talents,
+        profile.heroTrees,
+        (id) => getTalentFromEntry({ id }) !== undefined,
+      ),
+    [talents, snapshot, profile],
+  );
   // Estimates against the #1 parse alone swing wildly (one log's windows), so they wait for the
   // reference logs, unless they can't load at all.
   const mistakesReady = loaded.includes('reference') || (!busy && reference !== null);
@@ -336,6 +361,7 @@ export default function ProfileView({
         }
         actions={moreButtons}
       >
+        <DeathCutoffControl />
         {status && <p className="text-muted">{status}</p>}
         {reference ? (
           <>
@@ -353,9 +379,11 @@ export default function ProfileView({
             />
           </>
         ) : (
-          !benchmarkInputs && (
+          (!benchmarkInputs || tooShort) && (
             <p className="text-muted">
-              Benchmarks need a boss kill with rankings; showing this log on its own.
+              {tooShort
+                ? `The death cutoff leaves under ${MIN_CUT_MS / 1000} seconds of this fight: too little to compare; showing it on its own.`
+                : 'Benchmarks need a boss kill with rankings; showing this log on its own.'}
             </p>
           )
         )}
@@ -375,6 +403,15 @@ export default function ProfileView({
           ) : (
             <p className="text-muted">Estimates appear once the reference logs have loaded.</p>
           )}
+        </Panel>
+      )}
+
+      {talentComparison && (
+        <Panel
+          title="Talents"
+          explanation="Where your talents differ from what ranked players of your spec take on this boss."
+        >
+          <TalentComparison comparison={talentComparison} />
         </Panel>
       )}
 

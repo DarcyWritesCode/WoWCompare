@@ -52,6 +52,8 @@ export interface BenchmarkBundle {
   /** Ranked parses around the reference rank, best first. */
   pool: RankedParse[];
   totalParses: number | null;
+  /** Talents of the top 100 parses; missing from bundles built before the talent comparison. */
+  topTalents?: string[][];
   /** The reference candidates the job parsed. */
   reference: ReferenceBand;
   /** Parsed logs (the #1 and the reference candidates), by `logKey`. */

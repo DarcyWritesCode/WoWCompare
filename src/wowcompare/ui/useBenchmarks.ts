@@ -193,6 +193,7 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState<BenchmarkSelection | null>(null);
   const [poolSize, setPoolSize] = useState(0);
+  const [talents, setTalents] = useState<{ pool: string[][]; top: string[][] } | null>(null);
   const [effects, setEffects] = useState<BuffEffects | null>(null);
   /** Parsed logs by `parseKey`; null when parsing failed. */
   const [parsed, setParsed] = useState<Map<string, LogSnapshot | null>>(new Map());
@@ -271,6 +272,10 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
           }
         }
         setPoolSize(rankings.pool.length);
+        setTalents({
+          pool: rankings.pool.map((p) => p.talents),
+          top: rankings.topTalents ?? [],
+        });
         setSelection(next);
         // #1 first so something shows quickly, then the reference (usually already published).
         await load('top', next);
@@ -459,6 +464,8 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
       : [],
     /** Ranked parses that same build and close benchmarks are chosen from. */
     poolSize,
+    /** Talents of the ranked parses: the pool, and the top 100 when published. */
+    talents,
     /** The spec's measured buff effects, for buff line-up estimates. */
     effects,
     columns: derived?.columns ?? null,

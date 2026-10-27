@@ -123,6 +123,8 @@ export interface RankingsPool {
   top: RankedParse | undefined;
   /** Parses on the rankings pages covering the band, best first. */
   pool: RankedParse[];
+  /** Talents of the first rankings page (up to the top 100), for the talent comparison. */
+  topTalents?: string[][];
   /** Ranked parses for the spec, boss and difficulty; null when unknown (v1 mode). */
   totalParses: number | null;
 }
@@ -150,17 +152,23 @@ export async function fetchRankingsPool(
       },
     );
     const parses = response.rankings.map((r, i) => toRankedParse(r, i + 1));
-    return { top: parses[0], pool: parses, totalParses: null };
+    return {
+      top: parses[0],
+      pool: parses,
+      totalParses: null,
+      topTalents: parses.map((p) => p.talents),
+    };
   }
 
   const first = await fetchRankingsPage(query, 1);
   const top = first.parses[0];
+  const topTalents = first.parses.map((p) => p.talents);
   if (!top) {
     return { top, pool: [], totalParses: null };
   }
   const totalParses = await fetchTotalParses(query, top);
   if (totalParses === null) {
-    return { top, pool: first.parses, totalParses };
+    return { top, pool: first.parses, totalParses, topTalents };
   }
   const pages = [
     ...new Set(
@@ -173,5 +181,5 @@ export async function fetchRankingsPool(
   for (const page of pages) {
     pool = pool.concat(page === 1 ? first.parses : (await fetchRankingsPage(query, page)).parses);
   }
-  return { top, pool, totalParses };
+  return { top, pool, totalParses, topTalents };
 }
