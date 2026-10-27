@@ -698,13 +698,13 @@ function damageWindowGaps(player: LogSnapshot, windows: DamageWindowAnalysis | n
 }
 
 /**
- * Biggest gaps when the sims have run. The sim gives what the player's character does played
- * perfectly by the APL in this fight; real players can't be active all the time, so the target is
- * that at the top logs' active time (share of time alive spent casting). The play gap is the target
- * minus the player's DPS: downtime and death valued at the simmed DPS, and the rest (rotation and
- * timing) broken down by the log-based play estimates, scaled to fit. The setup gaps (item level,
- * raid buffs, talents, simmed) scale the target up to the top logs' character; whatever's left
- * against their actual DPS is what the model doesn't capture, shown as such.
+ * Biggest gaps when the sims have run. The sims measure differences on the player's character
+ * (item level, raid buffs, talents), which they're reliable for; their absolute DPS isn't (real top
+ * players can beat the APL, and the fight model is rough), so the target stays anchored to the top
+ * logs: their median DPS scaled down by those setup gaps is what this character would do played like
+ * them. The play gap is the target minus the player's DPS: downtime and death valued at the player's
+ * own DPS per active second, and the rotation estimates from the log. When those overlap and add up
+ * to more than the play gap they're scaled down together, so the list adds up; none is dropped.
  */
 function simmedGaps(
   profile: Profile,
@@ -718,8 +718,57 @@ function simmedGaps(
   const myAlive = aliveShare(player);
   const refAlive = median(topLogs.map(aliveShare)) ?? 1;
 
-  // Active time: the top logs' as recorded; for bundles from before it was, scaled from the
-  // player's by how much more often they cast.
+  // Setup: what makes the top logs' character stronger than this one, simmed on this one.
+  const factors = [
+    { key: 'ilvl', share: Math.max(0, sims.ilvl ?? 0) },
+    { key: 'raid', share: Math.max(0, sims.raidBuffs ?? 0) },
+    { key: 'talents', share: sims.talents },
+  ].map((f) => ({ ...f, log: Math.log1p(f.share) }));
+  const totalLog = factors.reduce((sum, f) => sum + f.log, 0);
+  const target = refDps / Math.exp(totalLog);
+  const setup = refDps - target;
+  const part = (key: string) => {
+    const f = factors.find((x) => x.key === key)!;
+    return totalLog !== 0 ? (setup * f.log) / totalLog : 0;
+  };
+  const gaps: Mistake[] = [];
+  const gearParts = [
+    sims.ilvl !== undefined && sims.ilvlDelta !== undefined
+      ? {
+          label: `Item level ${sims.ilvlDelta} below the top logs (simmed +${pct(sims.ilvl)})`,
+          dps: part('ilvl'),
+        }
+      : null,
+    sims.raidBuffs !== undefined
+      ? {
+          label: `Raid buffs your raid lacked: ${sims.missingBuffs.join(', ')} (simmed +${pct(sims.raidBuffs)})`,
+          dps: part('raid'),
+        }
+      : null,
+  ].filter((x): x is { label: string; dps: number } => x !== null && x.dps > 0);
+  if (gearParts.length > 0) {
+    gaps.push({
+      key: 'setup',
+      spellId: 0,
+      title: 'Gear and raid buffs',
+      detail: 'Simmed on your character from this log',
+      dps: gearParts.reduce((sum, x) => sum + x.dps, 0),
+      notPlay: true,
+      parts: gearParts,
+    });
+  }
+  if (sims.talents > 0) {
+    gaps.push({
+      key: 'talents',
+      spellId: 0,
+      title: 'Talents',
+      detail: `The most popular build simmed ${pct(sims.talents)} higher on your character, with this fight's targets (see Sim your gaps)`,
+      dps: part('talents'),
+    });
+  }
+
+  // Play: active time against the top logs' (recorded, or for older bundles scaled from the
+  // player's by how much more often they cast), at the player's own DPS per active second.
   const myActive = player.activeTime;
   const recorded = median(
     topLogs.flatMap((log) => (log.activeTime !== undefined ? [log.activeTime] : [])),
@@ -731,105 +780,44 @@ function simmedGaps(
     (myActive !== undefined && myRate && refRate
       ? Math.min(1, (myActive * refRate) / myRate)
       : null);
-
-  const gaps: Mistake[] = [];
-  // The player's character with their raid's buffs, played perfectly; then at the top logs' activity.
-  const perfect = sims.baselineDps ? sims.baselineDps / (1 + (sims.raidBuffs ?? 0)) : null;
-  if (perfect && myActive !== undefined && refActive !== null) {
-    const target = perfect * refActive * refAlive;
-    const downtime = perfect * Math.max(0, refActive - myActive) * myAlive;
-    const death = perfect * refActive * Math.max(0, refAlive - myAlive);
-    const rotation = target - player.fightDps - downtime - death;
-    gaps.push({
+  const play: Mistake[] = [];
+  if (myActive && refActive !== null && refActive > myActive) {
+    play.push({
       key: 'downtime',
       spellId: 0,
       title: 'Cast more often',
-      detail: `Active ${pct(myActive)} of your time alive; the top logs ${pct(refActive)}${recorded === null ? ' (estimated from their cast rate)' : ''}. Valued at your character's simmed DPS`,
-      dps: downtime,
+      detail: `Active ${pct(myActive)} of your time alive; the top logs ${pct(refActive)}${recorded === null ? ' (estimated from their cast rate)' : ''}. Valued at your own DPS per active second`,
+      dps: player.fightDps * (refActive / myActive - 1),
     });
-    gaps.push({
+  }
+  if (refAlive > myAlive && myAlive > 0) {
+    play.push({
       key: 'death',
       spellId: 0,
       title: 'Stay alive',
-      detail: `Dead for ${formatDuration(player.durationMs - (player.aliveMs ?? player.durationMs))} of ${formatDuration(player.durationMs)}, valued at your character's simmed DPS`,
-      dps: death,
+      detail: `Dead for ${formatDuration(player.durationMs - (player.aliveMs ?? player.durationMs))} of ${formatDuration(player.durationMs)}, valued at your DPS while alive`,
+      dps: (player.fightDps / myAlive) * (refAlive - myAlive),
     });
-    // Rotation and timing: what's left of the play gap, broken down where the log can measure it.
-    const explained = rotationGaps.reduce((sum, m) => sum + m.dps, 0);
-    if (rotation > 0) {
-      const scale = explained > rotation ? rotation / explained : 1;
-      gaps.push(...rotationGaps.map((m) => ({ ...m, dps: m.dps * scale })));
-      if (rotation > explained) {
-        gaps.push({
-          key: 'other-play',
-          spellId: 0,
-          title: 'Rotation and timing',
-          detail: `While active you did ${pct((player.fightDps - 0) / (perfect * myActive * myAlive))} of your character's simmed DPS (the top logs' target for you is ${formatNumber(target)} DPS); the gaps above don't explain all of it`,
-          dps: rotation - explained,
-        });
-      }
-    }
+  }
+  play.push(...rotationGaps);
 
-    // Setup: what scales your target up to the top logs' character.
-    const factors = [
-      { key: 'ilvl', share: Math.max(0, sims.ilvl ?? 0) },
-      { key: 'raid', share: Math.max(0, sims.raidBuffs ?? 0) },
-      { key: 'talents', share: sims.talents },
-    ].map((f) => ({ ...f, log: Math.log1p(f.share) }));
-    const totalLog = factors.reduce((sum, f) => sum + f.log, 0);
-    const predicted = target * Math.exp(totalLog);
-    const setup = predicted - target;
-    const part = (key: string) => {
-      const f = factors.find((x) => x.key === key)!;
-      return totalLog !== 0 ? (setup * f.log) / totalLog : 0;
-    };
-    const gearParts = [
-      sims.ilvl !== undefined && sims.ilvlDelta !== undefined
-        ? {
-            label: `Item level ${sims.ilvlDelta} below the top logs (simmed +${pct(sims.ilvl)})`,
-            dps: part('ilvl'),
-          }
-        : null,
-      sims.raidBuffs !== undefined
-        ? {
-            label: `Raid buffs your raid lacked: ${sims.missingBuffs.join(', ')} (simmed +${pct(sims.raidBuffs)})`,
-            dps: part('raid'),
-          }
-        : null,
-    ].filter((x): x is { label: string; dps: number } => x !== null && x.dps > 0);
-    if (gearParts.length > 0) {
+  const playGap = target - player.fightDps;
+  const explained = play.reduce((sum, m) => sum + m.dps, 0);
+  if (playGap > 0 && explained > playGap) {
+    // The play estimates overlap; scaled down together to the measured play gap.
+    const scale = playGap / explained;
+    gaps.push(...play.map((m) => ({ ...m, dps: m.dps * scale })));
+  } else {
+    gaps.push(...play);
+    if (playGap > explained) {
       gaps.push({
-        key: 'setup',
+        key: 'other-play',
         spellId: 0,
-        title: 'Gear and raid buffs',
-        detail: 'Simmed on your character from this log',
-        dps: gearParts.reduce((sum, x) => sum + x.dps, 0),
-        notPlay: true,
-        parts: gearParts,
+        title: 'Spell timing and setup',
+        detail: `The rest of your play gap, not broken down yet: you did ${pct(player.fightDps / target)} of what your character would do played like the top logs (${formatNumber(target)} DPS: their median scaled by the setup gaps above). Mostly casts hitting softer than theirs: spells cast without the buffs or debuffs that empower them, cooldowns and potions off their timing, damage on the wrong targets. Also holds what the log can't show (secondary stats, crafted item choices, external buffs, how the fight went)`,
+        dps: playGap - explained,
       });
     }
-    if (sims.talents > 0) {
-      gaps.push({
-        key: 'talents',
-        spellId: 0,
-        title: 'Talents',
-        detail: `The most popular build simmed ${pct(sims.talents)} higher on your character, with this fight's targets (see Sim your gaps)`,
-        dps: part('talents'),
-      });
-    }
-    // What the sims don't capture: fight mechanics, group strength, the APL against real play.
-    const unexplained = refDps - predicted;
-    if (unexplained > 0) {
-      gaps.push({
-        key: 'unexplained',
-        spellId: 0,
-        title: 'Not explained by the sims',
-        detail: `The top logs did ${formatNumber(refDps)} DPS; your character with their gear, buffs, talents and activity sims to ${formatNumber(predicted)}. Fight mechanics, group composition and timings the sim doesn't model`,
-        dps: unexplained,
-        notPlay: true,
-      });
-    }
-    return gaps;
   }
   return gaps;
 }
@@ -860,8 +848,9 @@ export function biggestMistakes(
     ...poolingMistakes(player, topLogs),
     ...buffOverlapMistakes(profile, player, topLogs, effects),
   ].filter((m) => Number.isFinite(m.dps) && m.dps > 0);
-  // With sims, downtime and death are valued by them; the other play estimates explain the rest.
-  const simmed = sims?.baselineDps
+  // With sims, downtime and death are measured from active time; the other play estimates explain
+  // the rest.
+  const simmed = sims
     ? simmedGaps(
         profile,
         player,

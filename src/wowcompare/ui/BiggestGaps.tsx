@@ -96,9 +96,9 @@ export default function BiggestGaps({
         ) ? (
           <>
             Against {referenceLabel}. Gear, raid buffs and talents are simmed on your character; the
-            rest of the gap is play, broken down where it can be measured from the log (each valued
-            at your own damage), with "other play differences" for the remainder. Together they add
-            up to the gap, apart from items too small to list.
+            rest of the gap is play, measured from the log (each valued at your own damage) and
+            scaled together when the estimates overlap, with "other play differences" for what they
+            don't explain. Together they add up to the gap, apart from items too small to list.
           </>
         ) : (
           <>

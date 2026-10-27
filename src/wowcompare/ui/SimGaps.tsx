@@ -92,7 +92,10 @@ export default function SimGaps({
         <table className="table table-condensed" style={{ marginTop: 8 }}>
           <tbody>
             <tr>
-              <td>Your character played perfectly (APL, always active)</td>
+              <td>
+                Your character played perfectly by the APL{' '}
+                <span className="text-muted">(for reference: real players can beat it)</span>
+              </td>
               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                 {formatNumber(run.result.baseline)} DPS
               </td>
