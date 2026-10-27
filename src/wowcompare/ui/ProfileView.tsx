@@ -4,12 +4,17 @@ import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { median, PASS_FRACTION, WARN_FRACTION } from '../benchmarks/aggregate';
 import { biggestMistakes, Mistake } from '../benchmarks/mistakes';
-import { AUGMENTATION_MIN_UPTIME, POWER_INFUSION_MIN_UPTIME } from '../benchmarks/reference';
+import {
+  AUGMENTATION_MIN_UPTIME,
+  POWER_INFUSION_MIN_UPTIME,
+  REFERENCE_LABEL,
+} from '../benchmarks/reference';
 import { CLOSE_COUNT } from '../benchmarks/select';
 import { compareTalents, TalentTree } from '../benchmarks/talents';
 import { loadTalentTree } from '../talentTrees';
 import { LogSnapshot, ProfileResults } from '../metrics/results';
 import { Profile } from '../profile/types';
+import { DamageWindowInputs, mergeSpans, useDamageWindowSpans } from '../damageWindows';
 import { useDeathCutoffState } from '../deathCutoff';
 import AplExpectations from './AplExpectations';
 import BenchmarkLogList from './BenchmarkLogList';
@@ -18,13 +23,14 @@ import BiggestMistakes from './BiggestMistakes';
 import { CHART_COLORS, DpsStrip, StatTile } from './charts';
 import CooldownDamage from './CooldownDamage';
 import CooldownEntry from './CooldownEntry';
+import DamageWindows from './DamageWindows';
 import DeathCutoffControl from './DeathCutoffControl';
+import FightTimelines from './FightTimelines';
 import ProfileResultsTable, { STATUS_COLORS } from './ProfileResultsTable';
 import Suggestions from './Suggestions';
 import TalentComparison from './TalentComparison';
 import { DEFAULT_NORMALIZATION, DPS_PER_ILVL, headline, Normalization } from './normalize';
 import useBenchmarks, { BenchmarkInputs, BenchmarkKind, BenchmarkReference } from './useBenchmarks';
-import WindowReels from './WindowReels';
 
 /** Extra benchmarks, as offered on their buttons. */
 const LOAD_HINTS: Partial<Record<BenchmarkKind, string>> = {
@@ -260,6 +266,7 @@ export default function ProfileView({
   unresolved,
   snapshot,
   benchmarkInputs,
+  damageWindowInputs,
 }: {
   profile: Profile;
   /** SimC tokens the profile builder couldn't map to spells. */
@@ -267,6 +274,8 @@ export default function ProfileView({
   snapshot: LogSnapshot;
   /** Undefined outside boss fights, where there are no rankings to compare against. */
   benchmarkInputs: Omit<BenchmarkInputs, 'playerResults'> | undefined;
+  /** Undefined on encounters without damage windows. */
+  damageWindowInputs?: DamageWindowInputs;
 }) {
   // A fight cut this short (by the death cutoff) has too little to compare.
   const tooShort = useDeathCutoffState().applied !== null && snapshot.durationMs < MIN_CUT_MS;
@@ -302,6 +311,19 @@ export default function ProfileView({
       // Not remembered; it still applies on this page.
     }
   };
+  const windowFetch = useDamageWindowSpans(damageWindowInputs);
+  const playerAmpWindows = useMemo(
+    () =>
+      windowFetch?.state === 'done' && damageWindowInputs
+        ? mergeSpans(windowFetch.spans)
+            .filter((w) => w.def.kind === 'amp')
+            .map((w): [number, number] => [
+              w.start - damageWindowInputs.fightStart,
+              w.end - damageWindowInputs.fightStart,
+            ])
+        : undefined,
+    [windowFetch, damageWindowInputs],
+  );
   const source = profile.source;
   const [talentTree, setTalentTree] = useState<TalentTree | null>(null);
   useEffect(() => {
@@ -389,6 +411,24 @@ export default function ProfileView({
                 : 'Benchmarks need a boss kill with rankings; showing this log on its own.'}
             </p>
           )
+        )}
+      </Panel>
+
+      <Panel
+        title="Fight timeline"
+        explanation={`Your DPS and cooldowns against the ${REFERENCE_LABEL} logs, from the pull. Bloodlust, damage potions and damage amp windows are banded in every chart; below, how you used this boss's damage windows.`}
+      >
+        <FightTimelines
+          player={snapshot}
+          playerAmpWindows={playerAmpWindows}
+          references={reference?.logs ?? []}
+          referenceLabel={REFERENCE_LABEL}
+        />
+        {damageWindowInputs && (
+          <>
+            <h4 style={{ marginTop: 24 }}>Damage windows</h4>
+            <DamageWindows inputs={damageWindowInputs} fetched={windowFetch} snapshot={snapshot} />
+          </>
         )}
       </Panel>
 
@@ -480,13 +520,6 @@ export default function ProfileView({
           </Panel>
         </>
       )}
-
-      <Panel
-        title="Cooldown windows"
-        explanation="DPS per second around each window (highlighted); the dashed line is the fight average. Scroll sideways through the windows."
-      >
-        <WindowReels player={snapshot} benchmarks={logs} />
-      </Panel>
 
       <Panel
         title="Logs compared against"

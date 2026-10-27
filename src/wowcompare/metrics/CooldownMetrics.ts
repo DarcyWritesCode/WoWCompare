@@ -164,6 +164,7 @@ class CooldownMetrics extends Analyzer {
           rank: entry.rank,
           label: entry.label,
           windows: windows.map((window) => this.timeline(window)),
+          castMs: resolved.casts.map((t) => t - this.owner.fight.start_time),
           abilities: this.abilityBreakdown(windows),
           entryStates: windows.map((window) => this.entryState(window, resolved.casts)),
         },

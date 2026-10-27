@@ -13,7 +13,11 @@ import Enemies from 'parser/shared/modules/Enemies';
 
 import { simcToken } from '../simc/resolve';
 import { mergeIntervals, totalDuration, windowThroughput } from './intervals';
-import { EXTERNAL_BUFF_IDS } from '../benchmarks/reference';
+import BLOODLUST_BUFFS from 'game/BLOODLUST_BUFFS';
+
+import { DAMAGE_POTION_IDS, DAMAGE_POTION_NAMES, EXTERNAL_BUFF_IDS } from '../benchmarks/reference';
+import { DamageWindowInputs } from '../damageWindows';
+import { DAMAGE_WINDOWS } from '../encounters/damageWindows';
 import {
   AbilityTotal,
   AuraUsage,
@@ -22,6 +26,9 @@ import {
   ProfileResults,
   scoreProfile,
 } from './results';
+
+/** Bucket size of the whole-fight DPS timeline. */
+const TIMELINE_BUCKET_MS = 2_000;
 
 /** Combines the metric modules into one scored, serializable result for the selected profile. */
 class ProfileMetrics extends Analyzer {
@@ -82,6 +89,23 @@ class ProfileMetrics extends Analyzer {
         raidSize: fight.size ?? 20,
         talents: this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`).sort(),
       },
+    };
+  }
+
+  /** Inputs for the damage windows panel; undefined on encounters without windows. */
+  private get damageWindowInputs(): DamageWindowInputs | undefined {
+    const { fight, report } = this.owner;
+    if (!fight.boss || !DAMAGE_WINDOWS[fight.boss]) {
+      return undefined;
+    }
+    return {
+      reportCode: report.code,
+      encounterId: fight.boss,
+      fightStart: fight.start_time,
+      fightEnd: fight.end_time,
+      hits: this.damageTimeline.damage,
+      casts: this.damageTimeline.casts,
+      enemies: Object.fromEntries(report.enemies.map((enemy) => [enemy.id, enemy.name])),
     };
   }
 
@@ -201,6 +225,38 @@ class ProfileMetrics extends Analyzer {
     }));
   }
 
+  /** DPS per `TIMELINE_BUCKET_MS` over the whole fight, rounded. */
+  private timeline(): LogSnapshot['timeline'] {
+    const start = this.owner.fight.start_time;
+    const buckets = new Array(
+      Math.max(1, Math.ceil((this.owner.fight.end_time - start) / TIMELINE_BUCKET_MS)),
+    ).fill(0);
+    for (const hit of this.damageTimeline.damage) {
+      const i = Math.floor((hit.timestamp - start) / TIMELINE_BUCKET_MS);
+      if (i >= 0 && i < buckets.length) {
+        buckets[i] += hit.amount;
+      }
+    }
+    return {
+      bucketMs: TIMELINE_BUCKET_MS,
+      dps: buckets.map((damage) => Math.round((damage / TIMELINE_BUCKET_MS) * 1000)),
+    };
+  }
+
+  /** Spans of the matching buffs on the player, ms from the pull, merged. */
+  private buffSpans(matches: (aura: { guid: number; name: string; sourceID?: number }) => boolean) {
+    const { start_time: start, end_time: end } = this.owner.fight;
+    const intervals = this.selectedCombatant.buffs
+      .filter((aura) =>
+        matches({ guid: aura.ability.guid, name: aura.ability.name, sourceID: aura.sourceID }),
+      )
+      .map((aura) => ({ start: aura.start, end: aura.end ?? end }));
+    return mergeIntervals(intervals, start, end).map((i): [number, number] => [
+      i.start - start,
+      i.end - start,
+    ]);
+  }
+
   /** Results plus window timelines: everything this log contributes to a comparison. */
   snapshot(): LogSnapshot | null {
     const results = this.results();
@@ -228,6 +284,13 @@ class ProfileMetrics extends Analyzer {
       fightDps: durationMs > 0 ? (damage / durationMs) * 1000 : 0,
       ilvl: this.selectedCombatant.ilvl,
       bossHp: this.damageTimeline.maxEnemyHp || undefined,
+      timeline: this.timeline(),
+      lust: this.buffSpans((aura) => aura.guid in BLOODLUST_BUFFS),
+      potions: this.buffSpans(
+        (aura) =>
+          aura.sourceID === this.owner.playerId &&
+          (DAMAGE_POTION_IDS.includes(aura.guid) || DAMAGE_POTION_NAMES.includes(aura.name)),
+      ),
     };
   }
 
@@ -245,6 +308,7 @@ class ProfileMetrics extends Analyzer {
           unresolved={getBuiltProfile(this.profile!.specId)?.unresolved ?? []}
           snapshot={snapshot}
           benchmarkInputs={this.benchmarkProps}
+          damageWindowInputs={this.damageWindowInputs}
         />
       ),
     };

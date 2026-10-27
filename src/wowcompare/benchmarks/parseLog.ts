@@ -12,6 +12,8 @@ import EventEmitter from 'parser/core/modules/EventEmitter';
 import { PlayerDetails } from 'parser/core/Player';
 import Report from 'parser/core/Report';
 
+import { fetchDamageWindowSpans, snapshotWindows } from '../damageWindows';
+import { DAMAGE_WINDOWS } from '../encounters/damageWindows';
 import ProfileMetrics from '../metrics/ProfileMetrics';
 import { LogSnapshot } from '../metrics/results';
 import { setProfile } from '../profile/registry';
@@ -105,7 +107,24 @@ export async function parseLogSnapshot(config: Config, ref: LogRef): Promise<Log
     }
   }
   parser.finish();
-  return parser.getModule(ProfileMetrics)?.snapshot() ?? null;
+  const snapshot = parser.getModule(ProfileMetrics)?.snapshot() ?? null;
+  // The encounter's damage windows, for the fight timelines; the parse doesn't see boss auras.
+  const defs = fight.boss ? DAMAGE_WINDOWS[fight.boss] : undefined;
+  if (snapshot && defs) {
+    try {
+      const spans = await fetchDamageWindowSpans(
+        ref.reportCode,
+        defs,
+        fight.start_time,
+        fight.end_time,
+      );
+      snapshot.damageWindows = snapshotWindows(spans, fight.start_time);
+    } catch (err) {
+      // The log still counts; its timeline just goes without windows.
+      console.warn(`Damage windows of ${ref.reportCode} fight ${ref.fightId}:`, err);
+    }
+  }
+  return snapshot;
 }
 
 const WORKER_COUNT = 3;

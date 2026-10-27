@@ -39,6 +39,17 @@ const AUGMENTATION_BUFFS = [EVOKER.EBON_MIGHT_BUFF_EXTERNAL.id, EVOKER.PRESCIENC
 /** Damage buffs other players cast on one player; logs funnelled these are optionally left out. */
 export const EXTERNAL_BUFF_IDS = [POWER_INFUSION, ...AUGMENTATION_BUFFS];
 /**
+ * Damage potion buffs, for marking them on fight timelines: Light's Potential, Potion of
+ * Recklessness and Draught of Rampant Abandon (Midnight). Names catch rank variants.
+ */
+export const DAMAGE_POTION_IDS = [1236616, 1236994, 1236998];
+export const DAMAGE_POTION_NAMES = [
+  "Light's Potential",
+  'Potion of Recklessness',
+  'Draught of Rampant Abandon',
+  'Potion of Zealotry',
+];
+/**
  * Power Infusion (15s every 2 min, so at most 12.5% uptime from one priest) at half its maximum
  * or more: a priest giving it to this player on cooldown, not a one-off.
  */

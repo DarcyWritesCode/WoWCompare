@@ -1,3 +1,4 @@
+import { DamageWindowKind } from '../encounters/damageWindows';
 import { CastRule, EntryKind, entryKey, MetricKind, Profile, Thresholds } from '../profile/types';
 
 export type Status = 'pass' | 'warn' | 'fail' | 'unknown';
@@ -178,6 +179,8 @@ export interface CooldownWindowSet {
   rank: number;
   label?: string;
   windows: CooldownWindow[];
+  /** Every cast, ms from the pull (for cooldowns without a buff window). Absent from older bundles. */
+  castMs?: number[];
   /** The biggest damage abilities inside the windows. */
   abilities: WindowAbility[];
   /** State going into each window, in window order. */
@@ -252,6 +255,17 @@ export interface LogSnapshot {
   ilvl?: number;
   /** The boss's max HP (the largest enemy the player hit). */
   bossHp?: number;
+  /** DPS over the whole fight, per `bucketMs` from the pull. Absent from older bundles. */
+  timeline?: { bucketMs: number; dps: number[] };
+  /** Bloodlust (any source) on the player: [start, end] ms from the pull. */
+  lust?: [number, number][];
+  /** The player's damage potions: [start, end] ms from the pull. */
+  potions?: [number, number][];
+  /**
+   * The encounter's damage windows (encounters/damageWindows.ts), ms from the pull. Set when
+   * parsing benchmark logs; the live page fetches the player's own.
+   */
+  damageWindows?: { auraId: number; kind: DamageWindowKind; startMs: number; endMs: number }[];
 }
 
 /**

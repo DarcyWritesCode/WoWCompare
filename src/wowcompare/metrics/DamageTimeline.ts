@@ -6,7 +6,13 @@ import Events, { CastEvent, DamageEvent, ResourceActor } from 'parser/core/Event
  * and the window timelines can slice them later.
  */
 class DamageTimeline extends Analyzer {
-  readonly damage: { timestamp: number; amount: number; spellId: number }[] = [];
+  readonly damage: {
+    timestamp: number;
+    amount: number;
+    spellId: number;
+    targetID: number;
+    targetInstance?: number;
+  }[] = [];
   readonly casts: {
     timestamp: number;
     spellId: number;
@@ -54,6 +60,8 @@ class DamageTimeline extends Analyzer {
       timestamp: event.timestamp,
       amount: event.amount + (event.absorbed ?? 0),
       spellId: event.ability.guid,
+      targetID: event.targetID,
+      targetInstance: event.targetInstance,
     });
   }
 }
