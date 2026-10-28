@@ -1,6 +1,6 @@
 import { formatDuration, formatNumber } from 'common/format';
 import { SpellLink } from 'interface';
-import { ReactNode } from 'react';
+import { createContext, ReactNode, useContext } from 'react';
 
 import { median } from '../benchmarks/aggregate';
 import { LogSnapshot } from '../metrics/results';
@@ -17,6 +17,12 @@ const LABEL_WIDTH = 160;
 const BUCKET_MS = 2_000;
 /** Buckets averaged either side when smoothing DPS lines. */
 const SMOOTHING = 2;
+/** Time ticks are the first of these steps (seconds) giving at most this many ticks. */
+const TIME_STEPS = [15, 30, 60, 120, 300];
+const MAX_TIME_TICKS = 10;
+/** Horizontal grid lines on the DPS charts, above zero. */
+const DPS_TICKS = 4;
+const GRID_COLOR = 'rgba(255, 255, 255, 0.12)';
 /** The reference line stops once fewer than this share of its logs are still fighting. */
 const MIN_ALIVE = 0.5;
 
@@ -153,6 +159,29 @@ function BandLanes({
   );
 }
 
+/** The time ticks as x positions in SVG units, shared by every chart's grid. */
+const TimeTicks = createContext<number[]>([]);
+
+/** Time ticks for a span: every step from the pull, the step chosen to keep them readable. */
+function timeTicks(spanMs: number): number[] {
+  const step =
+    TIME_STEPS.find((seconds) => spanMs / (seconds * 1000) <= MAX_TIME_TICKS) ??
+    TIME_STEPS[TIME_STEPS.length - 1];
+  const ticks: number[] = [];
+  for (let t = 0; t <= spanMs; t += step * 1000) {
+    ticks.push(defineMessage);
+  }
+  return ticks;
+}
+
+/** A round step (1, 2, 2.5 or 5 × 10ⁿ) splitting `max` into about `count` parts. */
+function niceStep(max: number, count: number): number {
+  const raw = max / count;
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].find((m) => m * magnitude >= raw) ?? 10;
+  return step * magnitude;
+}
+
 function Frame({
   label,
   height,
@@ -162,6 +191,7 @@ function Frame({
   height: number;
   children: ReactNode;
 }) {
+  const ticks = useContext(TimeTicks);
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, marginBottom: 2 }}>
       <div
@@ -184,6 +214,18 @@ function Frame({
         height={height}
         style={{ flex: 1, minWidth: 0, background: CHART_COLORS.track, display: 'block' }}
       >
+        {ticks.map((x) => (
+          <line
+            key={x}
+            x1={x}
+            x2={x}
+            y1={0}
+            y2={height}
+            stroke={GRID_COLOR}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
         {children}
       </svg>
     </div>
@@ -195,6 +237,7 @@ function DpsChart({
   series,
   average,
   maxDps,
+  dpsStep,
   bands,
   buckets,
   color,
@@ -203,7 +246,9 @@ function DpsChart({
   title: ReactNode;
   series: number[];
   average: number;
+  /** The scale's top, a multiple of `dpsStep`; shared by both DPS charts. */
   maxDps: number;
+  dpsStep: number;
   bands: BandShares;
   buckets: number;
   color: string;
@@ -213,13 +258,49 @@ function DpsChart({
   const x = (i: number) => ((i + 0.5) / buckets) * WIDTH;
   const y = (dps: number) => DPS_HEIGHT - (Math.min(dps, maxDps) / maxDps) * DPS_HEIGHT;
   const points = series.map((dps, i) => `${x(i)},${y(dps)}`);
+  const dpsTicks = Array.from({ length: Math.round(maxDps / dpsStep) + 1 }, (_, i) => i * dpsStep);
   return (
     <>
-      <h4 style={{ marginBottom: 4 }}>{title}</h4>
+      <h4 style={{ marginBottom: 4 }}>
+        {title} <small className="text-muted">{formatNumber(average)} DPS over the fight</small>
+      </h4>
+      {/* An axis, not a value: both charts share the scale, which tops out above the higher peak. */}
       <Frame
-        label={<span className="text-muted">{formatNumber(maxDps)} DPS</span>}
+        label={
+          <span
+            className="text-muted"
+            style={{ position: 'relative', display: 'block', height: '100%', fontSize: '0.9em' }}
+          >
+            {dpsTicks.map((dps) => (
+              <span
+                key={dps}
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: y(dps),
+                  transform: `translateY(${dps === 0 ? -100 : dps === maxDps ? 0 : -50}%)`,
+                  lineHeight: 1,
+                }}
+              >
+                {formatNumber(dps)}
+              </span>
+            ))}
+          </span>
+        }
         height={DPS_HEIGHT}
       >
+        {dpsTicks.map((dps) => (
+          <line
+            key={dps}
+            x1={0}
+            x2={WIDTH}
+            y1={y(dps)}
+            y2={y(dps)}
+            stroke={GRID_COLOR}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
         <BandLanes bands={bands} buckets={buckets} height={DPS_HEIGHT} logs={logs} />
         {points.length > 1 && (
           <>
@@ -355,7 +436,12 @@ export default function FightTimelines({
     referenceDps.push(alive.reduce((sum, { dps }) => sum + dps[i], 0) / alive.length);
   }
   const referenceAverage = median(withTimeline.map((log) => log.fightDps)) ?? 0;
-  const maxDps = Math.max(1, ...playerDps, ...referenceDps);
+  // A round scale top, so the evenly spaced ticks land on round numbers.
+  const peak = Math.max(1, ...playerDps, ...referenceDps);
+  const dpsStep = niceStep(peak, DPS_TICKS);
+  const maxDps = Math.ceil(peak / dpsStep) * dpsStep;
+  const axisMs = buckets * BUCKET_MS;
+  const ticksMs = timeTicks(spanMs);
 
   // Cooldowns the player has, in their order; reference share per bucket among logs that use it.
   const cooldownRows = player.windows.filter(
@@ -368,7 +454,7 @@ export default function FightTimelines({
     );
 
   return (
-    <>
+    <TimeTicks.Provider value={ticksMs.map((t) => (t / axisMs) * WIDTH)}>
       <div
         className="text-muted"
         style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginBottom: 8 }}
@@ -395,6 +481,7 @@ export default function FightTimelines({
         series={playerDps}
         average={player.fightDps}
         maxDps={maxDps}
+        dpsStep={dpsStep}
         bands={playerBands}
         buckets={buckets}
         color={CHART_COLORS.you}
@@ -405,6 +492,7 @@ export default function FightTimelines({
           series={referenceDps}
           average={referenceAverage}
           maxDps={maxDps}
+          dpsStep={dpsStep}
           bands={referenceBands}
           buckets={buckets}
           color={CHART_COLORS.reference}
@@ -437,14 +525,24 @@ export default function FightTimelines({
         style={{
           fontSize: '0.85em',
           marginLeft: LABEL_WIDTH + 8,
-          display: 'flex',
-          justifyContent: 'space-between',
+          position: 'relative',
+          height: 18,
         }}
       >
-        <span>0:00</span>
-        <span>{formatDuration(spanMs / 2)}</span>
-        <span>{formatDuration(spanMs)}</span>
+        {ticksMs.map((t, i) => (
+          <span
+            key={t}
+            style={{
+              position: 'absolute',
+              left: `${(t / axisMs) * 100}%`,
+              transform: i === 0 ? undefined : 'translateX(-50%)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {formatDuration(t)}
+          </span>
+        ))}
       </div>
-    </>
+    </TimeTicks.Provider>
   );
 }
