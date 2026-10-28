@@ -168,8 +168,8 @@ function timeTicks(spanMs: number): number[] {
     TIME_STEPS.find((seconds) => spanMs / (seconds * 1000) <= MAX_TIME_TICKS) ??
     TIME_STEPS[TIME_STEPS.length - 1];
   const ticks: number[] = [];
-  for (let t = 0; t <= spanMs; t += step * 1000) {
-    ticks.push(defineMessage);
+  for (let ms = 0; ms <= spanMs; ms += step * 1000) {
+    ticks.push(ms);
   }
   return ticks;
 }
@@ -454,7 +454,7 @@ export default function FightTimelines({
     );
 
   return (
-    <TimeTicks.Provider value={ticksMs.map((t) => (t / axisMs) * WIDTH)}>
+    <TimeTicks.Provider value={ticksMs.map((ms) => (ms / axisMs) * WIDTH)}>
       <div
         className="text-muted"
         style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginBottom: 8 }}
@@ -529,17 +529,17 @@ export default function FightTimelines({
           height: 18,
         }}
       >
-        {ticksMs.map((t, i) => (
+        {ticksMs.map((ms, i) => (
           <span
-            key={t}
+            key={ms}
             style={{
               position: 'absolute',
-              left: `${(t / axisMs) * 100}%`,
+              left: `${(ms / axisMs) * 100}%`,
               transform: i === 0 ? undefined : 'translateX(-50%)',
               whiteSpace: 'nowrap',
             }}
           >
-            {formatDuration(t)}
+            {formatDuration(ms)}
           </span>
         ))}
       </div>
