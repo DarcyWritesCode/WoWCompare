@@ -1,6 +1,6 @@
 import { formatDuration, formatNumber } from 'common/format';
 import { SpellLink } from 'interface';
-import { createContext, ReactNode, useContext } from 'react';
+import { createContext, ReactNode, useContext, useState } from 'react';
 
 import { median } from '../benchmarks/aggregate';
 import { LogSnapshot } from '../metrics/results';
@@ -23,6 +23,7 @@ const MAX_TIME_TICKS = 10;
 /** Horizontal grid lines on the DPS charts, above zero. */
 const DPS_TICKS = 4;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.12)';
+const CROSSHAIR_COLOR = 'rgba(255, 255, 255, 0.5)';
 /** The reference line stops once fewer than this share of its logs are still fighting. */
 const MIN_ALIVE = 0.5;
 
@@ -146,21 +147,39 @@ function BandLanes({
             height={lane}
             fill={band.color}
             opacity={logs === undefined ? OWN_BAND_OPACITY : shareOpacity(share)}
-          >
-            {logs !== undefined && (
-              <title>
-                {band.label}: {Math.round(share * logs)} of {logs} logs
-              </title>
-            )}
-          </rect>
+          />
         )),
       )}
     </>
   );
 }
 
-/** The time ticks as x positions in SVG units, shared by every chart's grid. */
-const TimeTicks = createContext<number[]>([]);
+/** Where the mouse is: x across every chart (0..1), y within the chart it's over (0..1). */
+interface Hover {
+  x: number;
+  y: number;
+  chart: string;
+}
+
+/** What every chart shares: the time axis and the crosshair. */
+const Timeline = createContext<{
+  /** Time ticks as x positions in SVG units. */
+  ticks: number[];
+  axisMs: number;
+  buckets: number;
+  hover: Hover | null;
+  setHover: (hover: Hover | null) => void;
+}>({ ticks: [], axisMs: 1, buckets: 1, hover: null, setHover: () => undefined });
+
+/** The bands up in a bucket, for tooltips: on or off for the player, a share of the logs otherwise. */
+function bandsAt(bands: BandShares, bucket: number, logs?: number): ReactNode[] {
+  return BANDS.filter((band) => (bands[band.key][bucket] ?? 0) > 0).map((band) => (
+    <div key={band.key} style={{ color: band.color }}>
+      {band.label}
+      {logs !== undefined && ` in ${Math.round(bands[band.key][bucket] * logs)} of ${logs} logs`}
+    </div>
+  ));
+}
 
 /** Time ticks for a span: every step from the pull, the step chosen to keep them readable. */
 function timeTicks(spanMs: number): number[] {
@@ -183,15 +202,23 @@ function niceStep(max: number, count: number): number {
 }
 
 function Frame({
+  id,
   label,
   height,
+  tooltip,
   children,
 }: {
+  /** Names the chart for the crosshair: its horizontal line and tooltip show only on this one. */
+  id: string;
   label: ReactNode;
   height: number;
+  /** What the tooltip says at a bucket, under the time. */
+  tooltip: (bucket: number) => ReactNode;
   children: ReactNode;
 }) {
-  const ticks = useContext(TimeTicks);
+  const { ticks, axisMs, buckets, hover, setHover } = useContext(Timeline);
+  const here = hover?.chart === id ? hover : null;
+  const bucket = here ? Math.min(buckets - 1, Math.floor(here.x * buckets)) : 0;
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, marginBottom: 2 }}>
       <div
@@ -207,32 +234,91 @@ function Frame({
       >
         {label}
       </div>
-      <svg
-        viewBox={`0 0 ${WIDTH} ${height}`}
-        preserveAspectRatio="none"
-        width="100%"
-        height={height}
-        style={{ flex: 1, minWidth: 0, background: CHART_COLORS.track, display: 'block' }}
-      >
-        {ticks.map((x) => (
-          <line
-            key={x}
-            x1={x}
-            x2={x}
-            y1={0}
-            y2={height}
-            stroke={GRID_COLOR}
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        {children}
-      </svg>
+      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+        <svg
+          viewBox={`0 0 ${WIDTH} ${height}`}
+          preserveAspectRatio="none"
+          width="100%"
+          height={height}
+          style={{ background: CHART_COLORS.track, display: 'block' }}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setHover({
+              x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+              y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+              chart: id,
+            });
+          }}
+          onMouseLeave={() => setHover(null)}
+        >
+          {ticks.map((x) => (
+            <line
+              key={x}
+              x1={x}
+              x2={x}
+              y1={0}
+              y2={height}
+              stroke={GRID_COLOR}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          {children}
+          {hover && (
+            <line
+              x1={hover.x * WIDTH}
+              x2={hover.x * WIDTH}
+              y1={0}
+              y2={height}
+              stroke={CROSSHAIR_COLOR}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              pointerEvents="none"
+            />
+          )}
+          {here && (
+            <line
+              x1={0}
+              x2={WIDTH}
+              y1={here.y * height}
+              y2={here.y * height}
+              stroke={CROSSHAIR_COLOR}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              pointerEvents="none"
+            />
+          )}
+        </svg>
+        {here && (
+          <div
+            style={{
+              position: 'absolute',
+              top: here.y * height + 12,
+              // Flips to the left of the cursor past the middle, so it stays on the chart.
+              ...(here.x < 0.5
+                ? { left: `calc(${here.x * 100}% + 12px)` }
+                : { right: `calc(${(1 - here.x) * 100}% + 12px)` }),
+              zIndex: 10,
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
+              background: 'rgba(20, 20, 20, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: 3,
+              padding: '4px 8px',
+              fontSize: '0.85em',
+            }}
+          >
+            <div className="text-muted">{formatDuration(here.x * axisMs)}</div>
+            {tooltip(bucket)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 function DpsChart({
+  id,
   title,
   series,
   average,
@@ -243,6 +329,7 @@ function DpsChart({
   color,
   logs,
 }: {
+  id: string;
   title: ReactNode;
   series: number[];
   average: number;
@@ -266,6 +353,15 @@ function DpsChart({
       </h4>
       {/* An axis, not a value: both charts share the scale, which tops out above the higher peak. */}
       <Frame
+        id={id}
+        tooltip={(bucket) => (
+          <>
+            <div style={{ color }}>
+              {bucket < series.length ? `${formatNumber(series[bucket])} DPS` : 'Fight over'}
+            </div>
+            {bandsAt(bands, bucket, logs)}
+          </>
+        )}
         label={
           <span
             className="text-muted"
@@ -335,6 +431,7 @@ function DpsChart({
 }
 
 function CooldownChart({
+  id,
   title,
   rows,
   bands,
@@ -342,6 +439,7 @@ function CooldownChart({
   logs,
   bandLogs,
 }: {
+  id: string;
   title: ReactNode;
   rows: { token: string; spellId: number; label?: string; active: number[] }[];
   bands: BandShares;
@@ -358,6 +456,20 @@ function CooldownChart({
       {rows.map((row) => (
         <Frame
           key={row.token}
+          id={`${id}:${row.token}`}
+          tooltip={(bucket) => (
+            <>
+              <div style={{ color: CHART_COLORS.you }}>
+                <SpellLink spell={row.spellId}>{row.label}</SpellLink>{' '}
+                {logs === undefined
+                  ? row.active[bucket] > 0
+                    ? 'up'
+                    : 'not up'
+                  : `up in ${Math.round((row.active[bucket] ?? 0) * logs)} of ${logs} logs`}
+              </div>
+              {bandsAt(bands, bucket, bandLogs)}
+            </>
+          )}
           label={<SpellLink spell={row.spellId}>{row.label}</SpellLink>}
           height={ROW_HEIGHT}
         >
@@ -397,6 +509,7 @@ export default function FightTimelines({
   references: LogSnapshot[];
   referenceLabel: string;
 }) {
+  const [hover, setHover] = useState<Hover | null>(null);
   const withTimeline = references.filter((log) => log.timeline);
   const spanMs = Math.max(
     player.durationMs,
@@ -454,7 +567,15 @@ export default function FightTimelines({
     );
 
   return (
-    <TimeTicks.Provider value={ticksMs.map((ms) => (ms / axisMs) * WIDTH)}>
+    <Timeline.Provider
+      value={{
+        ticks: ticksMs.map((ms) => (ms / axisMs) * WIDTH),
+        axisMs,
+        buckets,
+        hover,
+        setHover,
+      }}
+    >
       <div
         className="text-muted"
         style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginBottom: 8 }}
@@ -477,6 +598,7 @@ export default function FightTimelines({
       </div>
 
       <DpsChart
+        id="you"
         title="Your DPS"
         series={playerDps}
         average={player.fightDps}
@@ -488,6 +610,7 @@ export default function FightTimelines({
       />
       {withTimeline.length > 0 ? (
         <DpsChart
+          id="reference"
           title={`${referenceLabel}: mean DPS of ${withTimeline.length} logs`}
           series={referenceDps}
           average={referenceAverage}
@@ -505,6 +628,7 @@ export default function FightTimelines({
       )}
 
       <CooldownChart
+        id="your-cooldowns"
         title="Your cooldowns"
         rows={cooldownRows.map((set) => ({ ...set, active: activeShare([player], set.token) }))}
         bands={playerBands}
@@ -512,6 +636,7 @@ export default function FightTimelines({
       />
       {references.length > 0 && (
         <CooldownChart
+          id="reference-cooldowns"
           title={`${referenceLabel}: share of ${references.length} logs with each cooldown up`}
           rows={cooldownRows.map((set) => ({ ...set, active: activeShare(references, set.token) }))}
           bands={referenceBands}
@@ -543,6 +668,6 @@ export default function FightTimelines({
           </span>
         ))}
       </div>
-    </TimeTicks.Provider>
+    </Timeline.Provider>
   );
 }
