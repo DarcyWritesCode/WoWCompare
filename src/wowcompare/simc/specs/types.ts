@@ -22,6 +22,11 @@ export interface SpecAdapter {
    * also waits on their buff.
    */
   extraCooldowns?: string[];
+  /**
+   * Forms entered on a resource rather than a cooldown, e.g. Devourer's Void Metamorphosis:
+   * tracked like `extraCooldowns`, though the spell itself has no cooldown.
+   */
+  forms?: string[];
   /** Cooldowns without a buff: window length after each cast, by SimC token. */
   windowMs?: Record<string, number>;
   heroTrees?: HeroTree[];

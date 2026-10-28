@@ -46,6 +46,8 @@ export interface ProfileEntry extends SpellRef {
   thresholds?: Partial<Record<MetricKind, Thresholds>>;
   /** Casts that consume this proc (for `procUsage`). */
   consumers?: SpellRef[];
+  /** A form entered on a resource: graded as a cooldown though the spell has none. */
+  form?: boolean;
   /** Cooldowns without a buff: fixed window length after each cast, in ms. */
   windowMs?: number;
   /** Optional display name; the UI otherwise uses the spell's name. */

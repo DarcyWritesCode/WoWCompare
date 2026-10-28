@@ -53,7 +53,8 @@ export function buildProfile(
   });
 
   type Candidate = { order: number; entry: Omit<ProfileEntry, 'rank'> };
-  const extraCooldowns = (adapter.extraCooldowns ?? [])
+  const forms = new Set(adapter.forms);
+  const extraCooldowns = [...(adapter.extraCooldowns ?? []), ...forms]
     .filter((token) => !summary.cooldowns.some((cd) => cd.token === token))
     .map((token) => ({ token, order: -1 }));
   const candidates: Candidate[] = [
@@ -64,6 +65,7 @@ export function buildProfile(
         kind: 'cooldown' as const,
         metrics: ['cooldownUsage' as const, 'windowDps' as const],
         windowMs: adapter.windowMs?.[cd.token],
+        ...(forms.has(cd.token) && { form: true }),
       },
     })),
     ...summary.dots.map((dot) => ({
@@ -76,7 +78,7 @@ export function buildProfile(
       },
     })),
     ...summary.procs
-      .filter((proc) => !adapter.extraCooldowns?.includes(proc.token))
+      .filter((proc) => !adapter.extraCooldowns?.includes(proc.token) && !forms.has(proc.token))
       .map((proc) => ({
         order: proc.order,
         entry: {

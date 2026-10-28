@@ -118,8 +118,14 @@ class CooldownMetrics extends Analyzer {
     return known === undefined ? undefined : { spellId: known, casts: [] };
   }
 
-  /** Real cooldowns only: spells with no or a short cooldown aren't graded as cooldowns. */
-  private isCooldown(spellId: number): boolean {
+  /**
+   * Real cooldowns only: spells with no or a short cooldown aren't graded as cooldowns, unless
+   * the entry is a form entered on a resource.
+   */
+  private isCooldown(entry: ProfileEntry, spellId: number): boolean {
+    if (entry.form) {
+      return true;
+    }
     const cooldown = this.abilities.getAbility(spellId)?.cooldown;
     const fromLog = this.spellUsable
       .history(spellId)
@@ -128,11 +134,17 @@ class CooldownMetrics extends Analyzer {
     return seconds === undefined || seconds >= MIN_COOLDOWN_SECONDS;
   }
 
-  /** The cooldown's active windows: its buff if it has one, else a fixed span after each cast. */
+  /**
+   * The cooldown's active windows: its buff if it has one, else a fixed span after each cast. The
+   * buff is the cast's spell or any of the entry's IDs, for forms whose buff has its own ID.
+   */
   windows(entry: ProfileEntry, spellId: number, casts: number[]): Interval[] {
     const start = this.owner.fight.start_time;
     const end = this.owner.fight.end_time;
-    const buffIds = this.spellCatalog.resolve('buff', { token: entry.token, spellIds: [spellId] });
+    const buffIds = this.spellCatalog.resolve('buff', {
+      token: entry.token,
+      spellIds: [spellId, ...entry.spellIds],
+    });
     const buffWindows = buffIds.flatMap((id) =>
       this.selectedCombatant
         .getBuffHistory(id)
@@ -153,7 +165,7 @@ class CooldownMetrics extends Analyzer {
   windowTimelines(): CooldownWindowSet[] {
     return this.entries.flatMap((entry) => {
       const resolved = this.resolve(entry);
-      if (!resolved || !this.isCooldown(resolved.spellId)) {
+      if (!resolved || !this.isCooldown(entry, resolved.spellId)) {
         return [];
       }
       const windows = this.windows(entry, resolved.spellId, resolved.casts);
@@ -321,7 +333,7 @@ class CooldownMetrics extends Analyzer {
       const resolved = this.resolve(entry);
       const spellId = resolved?.spellId ?? entry.spellIds[0] ?? 0;
       const base = { token: entry.token, spellId, kind: entry.kind };
-      if (!resolved || !this.isCooldown(resolved.spellId)) {
+      if (!resolved || !this.isCooldown(entry, resolved.spellId)) {
         return { ...base, applicable: false, metrics };
       }
 

@@ -82,8 +82,17 @@ const OVERRIDES: Record<number, SpecOverrides> = {
     // A summon; the player has no buff for it.
     windowMs: { invoke_niuzao_the_black_ox: 25_000 },
   },
-  // Devourer has no window to measure: Void Metamorphosis is entered on Fury, not a cooldown, and
-  // its form has no buff of its own in logs (the Void Metamorphosis aura is up all fight).
+  [SPECS.DEVOURER_DEMON_HUNTER.id]: {
+    // The APL enters Void Metamorphosis from its hero-talent lists as `metamorphosis`. It costs
+    // souls and has no cooldown; its window is the form's buff (~40 s), which has its own ID. The
+    // other Void Metamorphosis aura is the souls building up between forms, not the window.
+    forms: ['metamorphosis'],
+    aliases: {
+      metamorphosis: {
+        action: [DEMON_HUNTER.VOID_METAMORPHOSIS_CAST.id, DEMON_HUNTER.VOID_METAMORPHOSIS_BUFF.id],
+      },
+    },
+  },
 };
 
 const snake = (name: string) => name.replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase();
