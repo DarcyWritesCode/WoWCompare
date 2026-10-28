@@ -2,7 +2,6 @@ import {
   MysticTouch,
   TouchOfDeath,
   SaveThemAll,
-  TeachingsOfTheMonestary,
   CelestialHooks,
 } from 'analysis/retail/monk/shared';
 import CoreCombatLogParser from 'parser/core/CombatLogParser';
@@ -24,6 +23,8 @@ import MasteryStats from './modules/features/MasteryStats';
 import MistweaverHealingEfficiencyDetails from './modules/features/MistweaverHealingEfficiencyDetails';
 import HealingEfficiencyTracker from './modules/features/MistweaverHealingEfficiencyTracker';
 import REMGraph from './modules/features/REMGraph';
+import ManaTeaGraph from './modules/features/ManaTeaGraph';
+import ManaGraph from './modules/features/ManaGraph';
 import JadeBond from './modules/spells/JadeBond';
 import RisingSunRevival from './modules/spells/UpliftedSpirits';
 import AncientTeachings from './modules/spells/AncientTeachings';
@@ -89,6 +90,7 @@ import StampedeOfTheAncients from './modules/heroTalents/StampedeOfTheAncients';
 import UnityWithin from './modules/heroTalents/UnityWithin';
 import TempleTraining from './modules/heroTalents/TempleTraining';
 import XuensGuidance from './modules/heroTalents/XuensGuidance';
+import TeachingsOfTheMonastery from './modules/spells/TeachingsOfTheMonastery';
 import NiuzaosProtection from './modules/heroTalents/NiuzaosProtection';
 import CourageOfTheWhiteTiger from './modules/heroTalents/CourageOfTheWhiteTiger';
 import FlowingWisdom from './modules/heroTalents/FlowingWisdom';
@@ -156,6 +158,8 @@ class CombatLogParser extends CoreCombatLogParser {
     mistyPeaksHealingBreakdown: MistyPeaksHealingBreakdown,
     averageTimeBetweenRSKSs: AverageTimeBetweenRSKSs,
     remGraph: REMGraph,
+    manaTeaGraph: ManaTeaGraph,
+    manaGraph: ManaGraph,
     hotCountGraph: HotCountGraph,
     talentHealingStatistic: TalentHealingStatistic,
     heroTalentHealingStatistic: HeroTalentHealingStatistic,
@@ -203,7 +207,7 @@ class CombatLogParser extends CoreCombatLogParser {
     yulonsWhisper: YulonsWhisper,
     rapidDiffusion: RapidDiffusion,
     dancingMists: DancingMists,
-    teachingsOfTheMonestary: TeachingsOfTheMonestary,
+    teachingsOfTheMonestary: TeachingsOfTheMonastery,
     sheilunsGift: SheilunsGift,
     veilOfPride: VeilOfPride,
     legacyOfWisdom: LegacyOfWisdom,
