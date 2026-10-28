@@ -21,7 +21,13 @@ import GEAR_SLOTS from 'game/GEAR_SLOTS';
 import { DAMAGE_POTION_IDS, DAMAGE_POTION_NAMES, EXTERNAL_BUFF_IDS } from '../benchmarks/reference';
 import { DamageWindowInputs } from '../damageWindows';
 import { DAMAGE_WINDOWS } from '../encounters/damageWindows';
-import { fightModel, SIMC_SLOTS, SimCharacter, simcClassToken } from '../sim/profileFromLog';
+import {
+  fightModel,
+  SIMC_SLOTS,
+  SimCharacter,
+  simcClassToken,
+  simcSpecToken,
+} from '../sim/profileFromLog';
 import {
   AbilityTotal,
   AuraUsage,
@@ -140,7 +146,7 @@ class ProfileMetrics extends Analyzer {
     const { spec } = this.owner.config;
     return {
       classToken: simcClassToken(spec.wclClassName),
-      specToken: simcClassToken(spec.wclSpecName),
+      specToken: simcSpecToken(spec.wclSpecName),
       talents: this.selectedCombatant.talentTree.map((t) => `${t.id}:${t.rank}`),
       gear,
       fightSeconds: (this.owner.fight.end_time - this.owner.fight.start_time) / 1000,

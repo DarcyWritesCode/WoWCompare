@@ -10,7 +10,7 @@ import type { TalentTree } from '../benchmarks/talents';
 
 /** The player's character from the log, as plain data. */
 export interface SimCharacter {
-  /** SimC's class and spec tokens, e.g. `death_knight`, `beast_mastery`. */
+  /** SimC's class and spec tokens, e.g. `deathknight`, `beast_mastery`. */
   classToken: string;
   specToken: string;
   /** `entryId:rank`, as on ranked parses. */
@@ -152,8 +152,10 @@ export const SIMC_SLOTS = [
   null,
 ] as const;
 
-/** `DeathKnight` to `death_knight`, `BeastMastery` to `beast_mastery`. */
-export const simcClassToken = (name: string) => name.replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase();
+/** SimC's spec token: `BeastMastery` to `beast_mastery`. */
+export const simcSpecToken = (name: string) => name.replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase();
+/** SimC's class token, which runs words together: `DeathKnight` to `deathknight`. */
+export const simcClassToken = (name: string) => name.toLowerCase();
 
 type TreeName = 'class' | 'spec' | 'hero';
 
