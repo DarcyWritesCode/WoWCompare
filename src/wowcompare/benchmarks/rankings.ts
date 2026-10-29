@@ -97,7 +97,7 @@ async function fetchRankingsPage(
 }
 
 /** Reports tried, best parse first, for the total number of parses. */
-const TOTAL_PARSES_TRIES = 5;
+const TOTAL_PARSES_TRIES = 20;
 
 /**
  * How many parses `parse` was ranked among: WCL's rankings list has no total, but the ranks it
@@ -169,16 +169,20 @@ export async function fetchRankingsPool(
   if (!top) {
     return { top, pool: [], totalParses: null };
   }
-  // The first readable report among the top few: a private one (WCL's "You do not have
-  // permission to view this report") would otherwise fail the whole boss. If none can be read,
-  // the pool is the first page.
+  // The first report among the top few that gives a total. A private one fails (WCL's "You do not
+  // have permission to view this report") and an anonymized one names its players "Anonymous", so
+  // neither gives one. If none does, the pool is the first page.
   let totalParses: number | null = null;
-  for (const parse of first.parses.slice(0, TOTAL_PARSES_TRIES)) {
+  for (const parse of first.parses
+    .filter((p) => p.name !== 'Anonymous')
+    .slice(0, TOTAL_PARSES_TRIES)) {
     try {
       totalParses = await fetchTotalParses(query, parse);
-      break;
     } catch {
       // Try the next one.
+    }
+    if (totalParses !== null) {
+      break;
     }
   }
   if (totalParses === null) {
