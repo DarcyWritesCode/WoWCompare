@@ -767,26 +767,21 @@ function simmedGaps(
     });
   }
 
-  // Play: active time against the top logs' (recorded, or for older bundles scaled from the
-  // player's by how much more often they cast), at the player's own DPS per active second.
+  // Play: active time against the top logs', at the player's own DPS per active second. Only when
+  // the top logs recorded it: estimating it from their cast rate also counted their haste and
+  // procs as active time (87% vs an estimated 95% for a gap nearer 5 points). Without it, downtime
+  // stays in the unexplained rest.
   const myActive = player.activeTime;
-  const recorded = median(
+  const refActive = median(
     topLogs.flatMap((log) => (log.activeTime !== undefined ? [log.activeTime] : [])),
   );
-  const myRate = fillerCasts(profile, player)?.perMinute;
-  const refRate = median(topLogs.flatMap((log) => fillerCasts(profile, log)?.perMinute ?? []));
-  const refActive =
-    recorded ??
-    (myActive !== undefined && myRate && refRate
-      ? Math.min(1, (myActive * refRate) / myRate)
-      : null);
   const play: Mistake[] = [];
   if (myActive && refActive !== null && refActive > myActive) {
     play.push({
       key: 'downtime',
       spellId: 0,
       title: 'Cast more often',
-      detail: `Active ${pct(myActive)} of your time alive; the top logs ${pct(refActive)}${recorded === null ? ' (estimated from their cast rate)' : ''}. Valued at your own DPS per active second`,
+      detail: `Active ${pct(myActive)} of your time alive; the top logs ${pct(refActive)}. Valued at your own DPS per active second`,
       dps: player.fightDps * (refActive / myActive - 1),
     });
   }
