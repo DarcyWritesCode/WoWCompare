@@ -1,6 +1,9 @@
 import RESOURCE_TYPES from 'game/RESOURCE_TYPES';
 import ROLES from 'game/ROLES';
-import Analyzer, { Options } from 'parser/core/Analyzer';
+import EVOKER from 'common/SPELLS/evoker';
+import SPECS from 'game/SPECS';
+import Analyzer, { Options, SELECTED_PLAYER } from 'parser/core/Analyzer';
+import Events, { ApplyBuffEvent, RemoveBuffEvent } from 'parser/core/Events';
 
 import { getBuiltProfile, getProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
@@ -23,7 +26,7 @@ import { DamageWindowInputs } from '../damageWindows';
 import { DAMAGE_WINDOWS } from '../encounters/damageWindows';
 import {
   fightModel,
-  SIMC_SLOTS,
+  simGear,
   SimCharacter,
   simcClassToken,
   simcSpecToken,
@@ -60,12 +63,66 @@ class ProfileMetrics extends Analyzer {
   protected enemies!: Enemies;
 
   private readonly profile: Profile | undefined;
+  /** Augmentation: time each ally had the player's Ebon Might or Prescience, ms. */
+  private readonly buffedMs = new Map<number, number>();
+  private readonly buffedSince = new Map<string, number>();
 
   constructor(options: Options) {
     super(options);
     const specId = this.selectedCombatant.spec?.id;
     this.profile = specId === undefined ? undefined : getProfile(specId);
     this.active = this.profile !== undefined;
+    if (this.active && specId === SPECS.AUGMENTATION_EVOKER.id) {
+      const buffs = [EVOKER.EBON_MIGHT_BUFF_EXTERNAL, EVOKER.PRESCIENCE_BUFF];
+      this.addEventListener(Events.applybuff.by(SELECTED_PLAYER).spell(buffs), this.onAllyBuff);
+      this.addEventListener(Events.removebuff.by(SELECTED_PLAYER).spell(buffs), this.onAllyBuff);
+    }
+  }
+
+  private onAllyBuff(event: ApplyBuffEvent | RemoveBuffEvent) {
+    if (event.targetID === this.selectedCombatant.id) {
+      return;
+    }
+    const key = `${event.targetID}:${event.ability.guid}`;
+    if (event.type === 'applybuff') {
+      this.buffedSince.set(key, event.timestamp);
+      return;
+    }
+    const since = this.buffedSince.get(key);
+    if (since !== undefined) {
+      this.buffedSince.delete(key);
+      this.buffedMs.set(
+        event.targetID,
+        (this.buffedMs.get(event.targetID) ?? 0) + event.timestamp - since,
+      );
+    }
+  }
+
+  /** Augmentation: the allies it buffed most, for sims with real players; empty for other specs. */
+  private get buffedAllies() {
+    const { fight, playerDetails } = this.owner;
+    const ms = new Map(this.buffedMs);
+    for (const [key, since] of this.buffedSince) {
+      const id = Number(key.split(':')[0]);
+      ms.set(id, (ms.get(id) ?? 0) + fight.end_time - since);
+    }
+    return [...ms]
+      .flatMap(([id, buffedMs]) => {
+        const player = playerDetails.find((p) => p.id === id);
+        return player ? [{ id, name: player.name, buffedMs }] : [];
+      })
+      .sort((a, b) => b.buffedMs - a.buffedMs);
+  }
+
+  /** Where the sims' fight and allies come from. */
+  private get simSource() {
+    const { fight, report } = this.owner;
+    return {
+      reportCode: report.code,
+      fightStart: fight.start_time,
+      fightEnd: fight.end_time,
+      buffedAllies: this.buffedAllies,
+    };
   }
 
   /** Call after the parse has finished. */
@@ -126,23 +183,7 @@ class ProfileMetrics extends Analyzer {
   /** The player's character for sims (sim/profileFromLog.ts). */
   private get simCharacter(): SimCharacter {
     const slotNames = Object.keys(GEAR_SLOTS) as (keyof typeof GEAR_SLOTS)[];
-    const gear = SIMC_SLOTS.flatMap((slot, index) => {
-      const item = slot ? this.selectedCombatant.getGear(slotNames[index]) : undefined;
-      if (!slot || !item?.id) {
-        return [];
-      }
-      const bonusIds = item.bonusIDs === undefined ? [] : [item.bonusIDs].flat();
-      return [
-        {
-          slot,
-          id: item.id,
-          itemLevel: item.itemLevel,
-          bonusIds,
-          gemIds: (item.gems ?? []).map((gem) => gem.id),
-          enchantId: item.permanentEnchant || undefined,
-        },
-      ];
-    });
+    const gear = simGear(slotNames.map((name) => this.selectedCombatant.getGear(name)));
     const { spec } = this.owner.config;
     return {
       classToken: simcClassToken(spec.wclClassName),
@@ -386,6 +427,7 @@ class ProfileMetrics extends Analyzer {
           benchmarkInputs={this.benchmarkProps}
           damageWindowInputs={this.damageWindowInputs}
           simCharacter={this.simCharacter}
+          simSource={this.simSource}
         />
       ),
     };

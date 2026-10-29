@@ -339,7 +339,8 @@ function hostility(value: QueryParams[string]) {
   if (value === undefined) {
     return undefined;
   }
-  return Number(value) === 1 ? 'Enemies' : 'Friendlies';
+  // v1 takes 1 for enemies; WoWCompare's own requests also pass v2's name.
+  return Number(value) === 1 || value === 'Enemies' ? 'Enemies' : 'Friendlies';
 }
 
 /**

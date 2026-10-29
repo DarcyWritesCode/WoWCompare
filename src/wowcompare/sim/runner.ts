@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 import { SIMC_BASE, SIMC_RELEASE } from './engine';
 
@@ -11,6 +11,8 @@ import { SIMC_BASE, SIMC_RELEASE } from './engine';
 export interface SimResult {
   /** The baseline profile's DPS. */
   baseline: number;
+  /** The whole raid's DPS on the baseline: the player plus any allies. */
+  raidDps?: number;
   sets: { name: string; mean: number; error: number }[];
 }
 
@@ -79,7 +81,11 @@ function getWorker(): Worker {
         break;
       case 'done':
         pending.delete(data.id);
-        job?.resolve({ baseline: data.baseline.mean, sets: data.sets });
+        job?.resolve({
+          baseline: data.baseline.mean,
+          raidDps: data.raidDps?.mean,
+          sets: data.sets,
+        });
         break;
       case 'error':
         if (job) {
@@ -161,4 +167,42 @@ export function setAutoSim(on: boolean) {
   } catch {
     // Not remembered; it applies on this page.
   }
+}
+
+/**
+ * Keeps the screen on while `active`: a phone that locks freezes the page and stops the sim. The
+ * browser drops the lock whenever the page is hidden, so it's taken again when it's shown.
+ */
+export function useWakeLock(active: boolean) {
+  useEffect(() => {
+    if (!active || typeof navigator === 'undefined' || !('wakeLock' in navigator)) {
+      return;
+    }
+    let lock: WakeLockSentinel | null = null;
+    let released = false;
+    const acquire = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      navigator.wakeLock.request('screen').then(
+        (sentinel) => {
+          if (released) {
+            sentinel.release();
+          } else {
+            lock = sentinel;
+          }
+        },
+        () => {
+          // Refused (battery saver, no permission): the sim runs as before.
+        },
+      );
+    };
+    acquire();
+    document.addEventListener('visibilitychange', acquire);
+    return () => {
+      released = true;
+      document.removeEventListener('visibilitychange', acquire);
+      lock?.release();
+    };
+  }, [active]);
 }

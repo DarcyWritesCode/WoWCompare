@@ -116,11 +116,15 @@ async function run({ id, base, input }) {
     }
     const json = JSON.parse(sim.getResultsJSON());
     sim.delete();
-    const dps = json.sim.players[0].collected_data.dps;
+    // The player is named "Player"; allies, when simmed, come after.
+    const player = json.sim.players.find((p) => p.name === 'Player') ?? json.sim.players[0];
+    const dps = player.collected_data.dps;
+    const raid = json.sim.statistics?.raid_dps;
     postMessage({
       type: 'done',
       id,
       baseline: { mean: dps.mean, error: dps.mean_std_dev * 1.96 },
+      raidDps: raid ? { mean: raid.mean, error: (raid.mean_std_dev ?? 0) * 1.96 } : undefined,
       sets: (json.sim.profilesets?.results ?? []).map((set) => ({
         name: set.name,
         mean: set.mean,

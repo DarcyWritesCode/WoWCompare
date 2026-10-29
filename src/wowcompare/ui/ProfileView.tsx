@@ -21,10 +21,20 @@ import {
   useDamageWindowSpans,
 } from '../damageWindows';
 import { useDeathCutoffState } from '../deathCutoff';
+import SPECS from 'game/SPECS';
+import {
+  AugSimMode,
+  rememberAugMode,
+  rememberedAugMode,
+  SimSource,
+  useSimAllies,
+} from '../sim/allies';
 import type { SimCharacter } from '../sim/profileFromLog';
+import { useRaidFight } from '../sim/raidFight';
 import { autoSim, canSim, preloadEngine } from '../sim/runner';
 import { useSimGaps } from '../sim/variants';
 import AplExpectations from './AplExpectations';
+import AugSimDialog from './AugSimDialog';
 import BenchmarkLogList from './BenchmarkLogList';
 import BenchmarkTable from './BenchmarkTable';
 import BiggestGaps from './BiggestGaps';
@@ -278,6 +288,7 @@ export default function ProfileView({
   benchmarkInputs,
   damageWindowInputs,
   simCharacter,
+  simSource,
 }: {
   profile: Profile;
   /** SimC tokens the profile builder couldn't map to spells. */
@@ -289,6 +300,8 @@ export default function ProfileView({
   damageWindowInputs?: DamageWindowInputs;
   /** The player's character for in-browser sims. */
   simCharacter?: SimCharacter;
+  /** Where sims read the fight's targets and, for Augmentation, its allies from. */
+  simSource?: SimSource;
 }) {
   // A fight cut this short (by the death cutoff) has too little to compare.
   const tooShort = useDeathCutoffState().applied !== null && snapshot.durationMs < MIN_CUT_MS;
@@ -371,14 +384,34 @@ export default function ProfileView({
       compareTalents(talents.pool, talents.top, snapshot.build.talents, talentTree),
     [talents, snapshot, talentTree],
   );
+  // Augmentation needs players to buff, and asks how (sim/allies.ts) on every page load unless
+  // told not to; its sims wait for the answer.
+  const isAug = profile.specId === SPECS.AUGMENTATION_EVOKER.id;
+  const [augMode, setAugMode] = useState<AugSimMode | null>(() =>
+    isAug ? rememberedAugMode() : null,
+  );
+  const [augDialog, setAugDialog] = useState(isAug && augMode === null);
+  const chooseAugMode = (mode: AugSimMode, ask: boolean) => {
+    rememberAugMode(mode, ask);
+    setAugMode(mode);
+    setAugDialog(false);
+  };
+  const allyFetch = useSimAllies(simSource, isAug && augMode === 'raid');
+  const simAllies =
+    allyFetch.state === 'done' && allyFetch.allies.length > 0 ? allyFetch.allies : undefined;
+  const alliesReady = !isAug || (augMode !== null && allyFetch.state !== 'loading');
+  // The fight's targets from the whole raid's damage, so a player who skipped the adds still sims
+  // with them; the player's own damage stands in when it can't load.
+  const raidFight = useRaidFight(simSource?.reportCode, simSource?.fightStart, simSource?.fightEnd);
   // Damage amp windows on the boss (or a target sharing its health) go into the sim's fight.
-  const simWindowsReady = !damageWindowInputs || windowFetch?.state !== 'loading';
+  const simWindowsReady =
+    (!damageWindowInputs || windowFetch?.state !== 'loading') && raidFight.state === 'done';
   const simFight = useMemo(
     () =>
       simCharacter && {
         ...simCharacter,
         fight: {
-          ...simCharacter.fight,
+          ...((raidFight.state === 'done' && raidFight.fight) || simCharacter.fight),
           vulnerable: (windowAnalysis?.amps ?? [])
             .filter((amp) => amp.def.onBoss || amp.def.sharedHealth)
             .map((amp) => ({
@@ -388,11 +421,19 @@ export default function ProfileView({
             })),
         },
       },
-    [simCharacter, windowAnalysis],
+    [simCharacter, windowAnalysis, raidFight],
   );
+  // The reference's item level shifts while its logs load; a sim started early would run again.
+  const referenceLoaded = loaded.includes('reference') || (!busy && reference !== null);
   const simInputs = useMemo(
     () =>
-      simFight && simWindowsReady && talentTree && talents && reference
+      simFight &&
+      simWindowsReady &&
+      alliesReady &&
+      referenceLoaded &&
+      talentTree &&
+      talents &&
+      reference
         ? {
             character: simFight,
             tree: talentTree,
@@ -400,20 +441,38 @@ export default function ProfileView({
             playerIlvl: snapshot.ilvl,
             referenceIlvl: reference.ilvl,
             raidClasses: snapshot.raid?.classes ?? [],
+            raidMetric: isAug,
+            allies: simAllies,
           }
         : null,
-    [simFight, simWindowsReady, talentTree, talents, reference, snapshot],
+    [
+      simFight,
+      simWindowsReady,
+      alliesReady,
+      referenceLoaded,
+      talentTree,
+      talents,
+      reference,
+      snapshot,
+      isAug,
+      simAllies,
+    ],
   );
   const sims = useSimGaps(simInputs);
   const simResults = sims.results;
   // Estimates against the #1 parse alone swing wildly (one log's windows), so they wait for the
   // reference logs, unless they can't load at all.
-  const mistakesReady = loaded.includes('reference') || (!busy && reference !== null);
+  const mistakesReady = referenceLoaded;
   // While the sims run, or their inputs (talents, the reference) are still loading, the gaps wait
   // for them rather than show the rougher log-only estimates first.
   const simPending =
     sims.pending ||
-    (!!simCharacter && !simInputs && busy && canSim() && autoSim() && sims.run.state !== 'error');
+    (!!simCharacter &&
+      !simInputs &&
+      (busy || !alliesReady || !simWindowsReady) &&
+      canSim() &&
+      autoSim() &&
+      sims.run.state !== 'error');
   const mistakes = useMemo(
     () =>
       reference && mistakesReady && !simPending
@@ -459,6 +518,12 @@ export default function ProfileView({
 
   return (
     <>
+      {augDialog && simCharacter && canSim() && (
+        <AugSimDialog
+          allyNames={(simSource?.buffedAllies ?? []).map((ally) => ally.name)}
+          onChoose={chooseAugMode}
+        />
+      )}
       <Panel
         title={profile.name}
         explanation={
@@ -527,11 +592,20 @@ export default function ProfileView({
           explanation="What your talents and item level are worth on your own character, simulated with SimulationCraft in your browser."
         >
           <SimGaps
-            character={simCharacter}
+            character={simFight ?? simCharacter}
             plan={sims.plan!}
             run={sims.run}
             start={sims.start}
             playerDps={snapshot.fightDps}
+            aug={
+              isAug
+                ? {
+                    mode: augMode,
+                    allies: simAllies?.map(({ ally }) => ally.name) ?? [],
+                    change: () => setAugDialog(true),
+                  }
+                : undefined
+            }
           />
         </Panel>
       )}

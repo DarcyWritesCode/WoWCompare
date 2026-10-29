@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { SIMC_RELEASE } from '../sim/engine';
 import type { SimCharacter } from '../sim/profileFromLog';
 import { autoSim, canSim, setAutoSim, useEngineState } from '../sim/runner';
-import type { SimRun, variantsFor } from '../sim/variants';
+import type { AugSimMode } from '../sim/allies';
+import { SimRun, variantChange, variantsFor } from '../sim/variants';
 import { CHART_COLORS, tint } from './charts';
 
 const fightText = (fight: SimCharacter['fight']) =>
@@ -33,6 +34,7 @@ export default function SimGaps({
   run,
   start,
   playerDps,
+  aug,
 }: {
   character: SimCharacter;
   plan: ReturnType<typeof variantsFor>;
@@ -40,6 +42,8 @@ export default function SimGaps({
   start: () => void;
   /** To turn sim differences into DPS at the player's own level. */
   playerDps: number;
+  /** Augmentation: how it's simmed (sim/allies.ts), and a way to change it. */
+  aug?: { mode: AugSimMode | null; allies: string[]; change: () => void };
 }) {
   const engine = useEngineState();
   const [auto, setAuto] = useState(autoSim);
@@ -61,14 +65,27 @@ export default function SimGaps({
   return (
     <>
       <p className="text-muted">
-        Your character from this log, simmed in your browser: played perfectly by the APL (the
-        target Biggest gaps measures your play against), and {plan.variants.length}{' '}
-        {plan.variants.length === 1 ? 'variant' : 'variants'} against your own talents and gear,
-        over {Math.round(character.fightSeconds)} s with {fightText(character.fight)}, as in this
-        log. SimulationCraft {SIMC_RELEASE.simcCommit.slice(0, 7)} (game data{' '}
+        Your character from this log, simmed in your browser against {plan.variants.length}{' '}
+        {plan.variants.length === 1 ? 'variant' : 'variants'} of your own talents and gear, over{' '}
+        {Math.round(character.fightSeconds)} s with {fightText(character.fight)}, as in this log.
+        Each variant changes one thing; only the differences are used, since a sim's own DPS isn't a
+        reliable target. SimulationCraft {SIMC_RELEASE.simcCommit.slice(0, 7)} (game data{' '}
         {SIMC_RELEASE.gameVersion}), via{' '}
         <a href="https://github.com/PwogSoupe/voidsim-simc">voidsim</a>.
       </p>
+      {aug && (
+        <p style={tint(CHART_COLORS.loss)}>
+          Augmentation: Warcraft Logs credits you with the damage your Ebon Might and Prescience add
+          to other players, so these sims are scored by the whole raid&apos;s DPS, and each change
+          is a share of everything you added (your damage plus your buffs&apos;).{' '}
+          {aug.allies.length > 0
+            ? `Simmed with ${aug.allies.join(', ')}, the players you buffed most, on their own gear and talents.`
+            : "Simmed with SimulationCraft's stand-in raid of eight generic players, not your raid, so read these as rough."}{' '}
+          <button type="button" className="btn btn-link btn-sm hidden-print" onClick={aug.change}>
+            Change
+          </button>
+        </p>
+      )}
       <label className="hidden-print" style={{ fontWeight: 'normal', display: 'block' }}>
         <input
           type="checkbox"
@@ -91,24 +108,12 @@ export default function SimGaps({
       {run.state === 'done' && (
         <table className="table table-condensed" style={{ marginTop: 8 }}>
           <tbody>
-            <tr>
-              <td>
-                Your character played perfectly by the APL{' '}
-                <span className="text-muted">(for reference: real players can beat it)</span>
-              </td>
-              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                {formatNumber(run.result.baseline)} DPS
-              </td>
-              <td className="text-muted" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                every raid buff
-              </td>
-            </tr>
             {plan.variants.map((variant) => {
-              const set = run.result.sets.find((s) => s.name === variant.name);
-              if (!set) {
+              const measured = variantChange(run.result, variant.name);
+              if (!measured) {
                 return null;
               }
-              const change = set.mean / run.result.baseline - 1;
+              const { change, error } = measured;
               return (
                 <tr key={variant.name}>
                   <td>{plan.labels[variant.name]}</td>
@@ -120,7 +125,7 @@ export default function SimGaps({
                     }}
                   >
                     {change >= 0 ? '+' : ''}
-                    {(change * 100).toFixed(1)}% ±{((set.error / set.mean) * 100).toFixed(1)}
+                    {(change * 100).toFixed(1)}% ±{(error * 100).toFixed(1)}
                   </td>
                   <td className="text-muted" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     ≈{change >= 0 ? '+' : ''}

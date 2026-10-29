@@ -2,8 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { absentRaidBuffs } from '../benchmarks/raidBuffs';
 import type { TalentTree } from '../benchmarks/talents';
-import { popularTrees, SimCharacter, simcInput, SimVariant, talentsByTree } from './profileFromLog';
-import { autoSim, canSim, runSim, SimResult } from './runner';
+import {
+  IDLE_SET,
+  idleTwin,
+  popularTrees,
+  SimAlly,
+  SimCharacter,
+  simcInput,
+  SimVariant,
+  talentsByTree,
+} from './profileFromLog';
+import { autoSim, canSim, runSim, SimResult, useWakeLock } from './runner';
 
 /** Each variant's DPS to within this many percent (95% confidence). */
 const TARGET_ERROR = 0.2;
@@ -15,7 +24,7 @@ const TREE_LABELS = { class: 'Class tree', spec: 'Spec tree', hero: 'Hero tree' 
 
 /** What the sims measured, as shares of the player's DPS (see `simGapResults`). */
 export interface SimGapResults {
-  /** The player's character played perfectly by the APL, every raid buff; absent when nothing was simmed. */
+  /** The player's simmed DPS (Augmentation: its whole contribution), every raid buff; absent when nothing was simmed. */
   baselineDps?: number;
   /** The most popular build against theirs; 0 when theirs is it. */
   talents: number;
@@ -36,6 +45,10 @@ export interface SimGapInputs {
   referenceIlvl: number | null;
   /** Classes in the player's raid, for its raid buffs. */
   raidClasses: string[];
+  /** Score by raid DPS (Augmentation): see `simcInput`. */
+  raidMetric?: boolean;
+  /** Real players from the log to sim alongside the player. */
+  allies?: { ally: SimAlly; tree: TalentTree }[];
 }
 
 /**
@@ -93,10 +106,44 @@ export function variantsFor({
     variants.push({
       name: 'raid',
       overrides: absent.map((buff) => `override.${buff.simcOverride}=0`),
+      affectsRaid: true,
     });
     labels.raid = `Without the raid buffs your raid lacked (${absent.map((buff) => buff.name).join(', ')})`;
   }
   return { variants, labels, ilevelDelta, absent };
+}
+
+/**
+ * The player's DPS in the sim: their own, or scored by raid DPS, the raid's DPS less the raid's
+ * with the player idle (everything their buffs added to others included).
+ */
+export function simmedContribution(result: SimResult): number {
+  const idle = result.sets.find((s) => s.name === IDLE_SET);
+  return result.raidDps !== undefined && idle ? result.raidDps - idle.mean : result.baseline;
+}
+
+/** A variant's change against the baseline, as a share of the player's DPS, with its error. */
+export function variantChange(result: SimResult, name: string) {
+  const set = result.sets.find((s) => s.name === name);
+  if (!set) {
+    return undefined;
+  }
+  const idle = result.sets.find((s) => s.name === IDLE_SET);
+  if (result.raidDps !== undefined && idle) {
+    const contribution = result.raidDps - idle.mean;
+    // A change to everyone (raid buffs) is the player's contribution under it, against theirs.
+    const twin = result.sets.find((s) => s.name === idleTwin(name));
+    return twin
+      ? {
+          change: (set.mean - twin.mean) / contribution - 1,
+          error: Math.hypot(set.error, twin.error) / contribution,
+        }
+      : {
+          change: (set.mean - result.raidDps) / contribution,
+          error: set.error / contribution,
+        };
+  }
+  return { change: set.mean / result.baseline - 1, error: set.error / set.mean };
 }
 
 /** The sim results as shares of the player's DPS, for Biggest gaps. */
@@ -104,13 +151,10 @@ export function simGapResults(
   result: SimResult,
   { variants, ilevelDelta, absent }: ReturnType<typeof variantsFor>,
 ): SimGapResults {
-  const change = (name: string) => {
-    const set = result.sets.find((s) => s.name === name);
-    return set ? set.mean / result.baseline - 1 : undefined;
-  };
+  const change = (name: string) => variantChange(result, name)?.change;
   const raid = change('raid');
   return {
-    baselineDps: result.baseline,
+    baselineDps: simmedContribution(result),
     talents: variants.some((v) => v.name === 'all_trees') ? (change('all_trees') ?? 0) : 0,
     ilvl: change('ilvl'),
     ilvlDelta: ilevelDelta >= 1 ? ilevelDelta : undefined,
@@ -138,6 +182,8 @@ export function useSimGaps(inputs: SimGapInputs | null) {
         ? simcInput(inputs.character, inputs.tree, plan.variants, {
             threads: Math.min(MAX_THREADS, navigator.hardwareConcurrency || 4),
             targetError: TARGET_ERROR,
+            raidMetric: inputs.raidMetric,
+            allies: inputs.allies,
           })
         : null,
     [inputs, plan],
@@ -161,8 +207,8 @@ export function useSimGaps(inputs: SimGapInputs | null) {
     };
   }, [input, requested]);
 
-  // The baseline (the player's character played perfectly) is simmed even with no variants: it
-  // sets the target the play gap is measured against.
+  useWakeLock(run.state === 'running');
+
   return {
     plan,
     run,

@@ -1,3 +1,8 @@
+import { IGNORED } from 'common/TALENTS/IGNORED';
+import SPECS from 'game/SPECS';
+import type { CombatantInfoEvent } from 'parser/core/Events';
+import type { Item } from 'parser/core/EventsItems';
+
 import type { TalentTree } from '../benchmarks/talents';
 
 /**
@@ -35,6 +40,8 @@ export interface FightModel {
   vulnerable?: { start: number; duration: number; multiplier: number }[];
 }
 
+/** Iterations with real allies: about ±0.5% of an Augmentation's contribution. */
+const ALLY_ITERATIONS = 1000;
 /** Buckets the fight is read in, ms. */
 const FIGHT_BUCKET_MS = 5_000;
 /** An enemy counts as a target in a bucket when it took this share of the player's damage. */
@@ -152,6 +159,54 @@ export const SIMC_SLOTS = [
   null,
 ] as const;
 
+/** A combatantinfo gear list (in its slot order) as SimC items. */
+export function simGear(items: (Item | undefined)[]): SimItem[] {
+  return SIMC_SLOTS.flatMap((slot, index) => {
+    const item = items[index];
+    if (!slot || !item?.id) {
+      return [];
+    }
+    return [
+      {
+        slot,
+        id: item.id,
+        itemLevel: item.itemLevel,
+        bonusIds: item.bonusIDs === undefined ? [] : [item.bonusIDs].flat(),
+        gemIds: (item.gems ?? []).map((gem) => gem.id),
+        enchantId: item.permanentEnchant || undefined,
+      },
+    ];
+  });
+}
+
+/** Another player in the sim, from their combatantinfo: an ally for Augmentation to buff. */
+export interface SimAlly {
+  name: string;
+  specId: number;
+  classToken: string;
+  specToken: string;
+  talents: string[];
+  gear: SimItem[];
+}
+
+/** An ally from the log's combatantinfo; null when the spec isn't known. */
+export function allyFromCombatantInfo(info: CombatantInfoEvent, name: string): SimAlly | null {
+  const spec = SPECS[info.specID];
+  if (!spec?.wclClassName || !spec.wclSpecName) {
+    return null;
+  }
+  return {
+    name,
+    specId: spec.id,
+    classToken: simcClassToken(spec.wclClassName),
+    specToken: simcSpecToken(spec.wclSpecName),
+    talents: (info.talentTree ?? [])
+      .filter((t) => !IGNORED.includes(t.id))
+      .map((t) => `${t.id}:${t.rank}`),
+    gear: simGear(info.gear ?? []),
+  };
+}
+
 /** SimC's spec token: `BeastMastery` to `beast_mastery`. */
 export const simcSpecToken = (name: string) => name.replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase();
 /** SimC's class token, which runs words together: `DeathKnight` to `deathknight`. */
@@ -203,36 +258,89 @@ export interface SimVariant {
   ilevelDelta?: number;
   /** Extra SimC option lines, e.g. `override.chaos_brand=0`. */
   overrides?: string[];
+  /**
+   * Changes the other players too (raid buffs). Scored by raid DPS, it gets an idle twin
+   * (`<name>_idle`), so only the player's part of the change is counted.
+   */
+  affectsRaid?: boolean;
 }
 
 /** Profileset names may only hold simple characters. */
 const setName = (name: string) => name.replace(/[^a-zA-Z0-9_]/g, '_');
 
+/** Actor names may only hold simple characters, and must differ from the player's. */
+const actorName = (name: string, i: number) => `Ally${i + 1}_${name.replace(/[^a-zA-Z0-9]/g, '')}`;
+
+const actorLines = (
+  actor: Pick<SimCharacter, 'classToken' | 'specToken' | 'talents' | 'gear'>,
+  name: string,
+  tree: TalentTree,
+) => [
+  `${actor.classToken}="${name}"`,
+  `spec=${actor.specToken}`,
+  'level=90',
+  ...talentLines(talentsByTree(actor.talents, tree)),
+  ...actor.gear.map((item) => itemLine(item)),
+];
+
+/** The profileset that measures Augmentation's whole contribution: the player casting nothing. */
+export const IDLE_SET = 'idle';
+const IDLE_ACTIONS = ['actions=wait,sec=10000', 'actions.precombat=wait,sec=0'];
+export const idleTwin = (name: string) => `${name}_idle`;
+
+export interface SimInputOptions {
+  threads: number;
+  targetError: number;
+  /**
+   * Score by the whole raid's DPS, for Augmentation: Warcraft Logs credits it with the damage its
+   * buffs add to others. With no allies, SimC adds its own generic raid around a lone Augmentation.
+   */
+  raidMetric?: boolean;
+  /** Real players from the log to sim alongside, with their talent trees. */
+  allies?: { ally: SimAlly; tree: TalentTree }[];
+}
+
 /**
  * The full SimC input: the player, then one profileset per variant (each only overrides what it
- * changes, so SimC reuses everything else).
+ * changes, so SimC reuses everything else). Profileset lines apply to the first actor, so the
+ * player comes before any allies. Scored by raid DPS, an extra profileset with the player idle
+ * gives the raid without them, so the difference is their whole contribution.
  */
 export function simcInput(
   character: SimCharacter,
   tree: TalentTree,
   variants: SimVariant[],
-  options: { threads: number; targetError: number },
+  { threads, targetError, raidMetric = false, allies = [] }: SimInputOptions,
 ): string {
-  const byTree = talentsByTree(character.talents, tree);
   const lines = [
-    `${character.classToken}="Player"`,
-    `spec=${character.specToken}`,
-    'level=90',
-    ...talentLines(byTree),
-    ...character.gear.map((item) => itemLine(item)),
+    ...actorLines(character, 'Player', tree),
+    ...allies.flatMap(({ ally, tree: allyTree }, i) =>
+      actorLines(ally, actorName(ally.name, i), allyTree),
+    ),
     `max_time=${Math.round(character.fightSeconds)}`,
     'vary_combat_length=0',
     ...fightLines(character.fight, character.fightSeconds),
-    `target_error=${options.targetError}`,
-    'iterations=20000',
-    `threads=${options.threads}`,
+    // target_error follows the player's own DPS; with real allies every iteration costs several
+    // characters, so a fixed count keeps the sim to minutes.
+    ...(allies.length > 0
+      ? ['target_error=0', `iterations=${ALLY_ITERATIONS}`]
+      : [`target_error=${targetError}`, 'iterations=20000']),
+    `threads=${threads}`,
+    ...(raidMetric ? ['profileset_metric=raid_dps'] : []),
   ];
-  for (const variant of variants) {
+  const sets: SimVariant[] = raidMetric
+    ? [
+        ...variants,
+        { name: IDLE_SET, overrides: IDLE_ACTIONS },
+        ...variants
+          .filter((variant) => variant.affectsRaid)
+          .map((variant) => ({
+            name: idleTwin(variant.name),
+            overrides: [...(variant.overrides ?? []), ...IDLE_ACTIONS],
+          })),
+      ]
+    : variants;
+  for (const variant of sets) {
     const name = setName(variant.name);
     const overrides = [
       ...Object.entries(variant.trees ?? {}).map(
