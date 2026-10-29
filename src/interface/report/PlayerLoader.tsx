@@ -47,6 +47,11 @@ const PlayerLoader = ({ children }: Props) => {
     {
       fetcher: (url) => fetch(url).then((res) => res.json()),
       isPaused: () => isUnsupportedClassicVersion(selectedReport.gameVersion),
+      // WoWCompare: a fight's players don't change. A refetch on focus that failed (a phone
+      // waking without network yet) showed the error panel and re-ran the whole analysis.
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
     },
   );
 

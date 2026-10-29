@@ -12,6 +12,7 @@ import svgr from 'vite-plugin-svgr';
 import checker from 'vite-plugin-checker';
 
 import publishedDataPlugin from './vite/publishedDataPlugin';
+import noReconnectReloadPlugin from './vite/noReconnectReloadPlugin';
 import simcPlugin from './vite/simcPlugin';
 
 const GOOGLE_ANALYTICS_SCRIPT = `
@@ -75,6 +76,7 @@ export default defineConfig((env) => ({
   plugins: [
     publishedDataPlugin(),
     simcPlugin(),
+    noReconnectReloadPlugin(),
     react(),
     lingui(),
     babel({
