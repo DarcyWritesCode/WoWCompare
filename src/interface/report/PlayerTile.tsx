@@ -18,6 +18,8 @@ import { useFight } from 'interface/report/context/FightContext';
 import { isMythicPlus } from 'common/isMythicPlus';
 import { fetchCharacter } from 'interface/reducers/charactersById';
 import { useReport } from './context/ReportContext';
+import { PlayerPerformance } from 'wowcompare/groupPerformance';
+import PlayerPerformanceLine from 'wowcompare/ui/PlayerPerformanceLine';
 import { wclGameVersionToBranch } from 'game/VERSIONS';
 import GameBranch from 'game/GameBranch';
 
@@ -56,8 +58,9 @@ interface PlayerTileContentsProps {
   avatar: string;
   player: PlayerDetails;
   spec: Spec;
+  performance?: PlayerPerformance;
 }
-const PlayerTileContents = ({ avatar, player, spec }: PlayerTileContentsProps) => {
+const PlayerTileContents = ({ avatar, player, spec, performance }: PlayerTileContentsProps) => {
   const { i18n } = useLingui();
 
   const specName = spec?.specName ? i18n._(spec.specName) : undefined;
@@ -84,6 +87,7 @@ const PlayerTileContents = ({ avatar, player, spec }: PlayerTileContentsProps) =
               <Icon icon="inv_helmet_03" /> {player.ilvl ?? 0}
             </div>
           </div>
+          {performance && <PlayerPerformanceLine performance={performance} specName={specName} />}
         </div>
       </div>
     </>
@@ -94,6 +98,8 @@ interface PlayerTileProps {
   player: PlayerDetails;
   makeUrl: (playerId: number) => string;
   config?: Config;
+  /** WoWCompare: DPS or HPS against the spec's 95th percentile. */
+  performance?: PlayerPerformance;
 }
 
 // specs with performance issues during analysis. the "can i load this on my underpowered laptop" test is how things end up here.
@@ -101,7 +107,7 @@ function isSpecDisabledInDungeons(spec: Spec): boolean {
   return false;
 }
 
-const PlayerTile = ({ player, makeUrl, config }: PlayerTileProps) => {
+const PlayerTile = ({ player, makeUrl, config, performance }: PlayerTileProps) => {
   const characterInfo = useWaSelector((state) => getCharacterById(state, player.guid));
   const dispatch = useWaDispatch();
   const { fight } = useFight();
@@ -159,14 +165,14 @@ const PlayerTile = ({ player, makeUrl, config }: PlayerTileProps) => {
   if (isMythicPlus(fight) && isSpecDisabledInDungeons(spec)) {
     return (
       <BlockLoading message="This spec is currently disabled in M+ due to the large number of events generated causing performance problems.">
-        <PlayerTileContents avatar={avatar} player={player} spec={spec} />
+        <PlayerTileContents avatar={avatar} player={player} spec={spec} performance={performance} />
       </BlockLoading>
     );
   }
 
   return (
     <Link to={makeUrl(player.id)} className={`player ${getClassName(spec.role)}`}>
-      <PlayerTileContents avatar={avatar} player={player} spec={spec} />
+      <PlayerTileContents avatar={avatar} player={player} spec={spec} performance={performance} />
     </Link>
   );
 };

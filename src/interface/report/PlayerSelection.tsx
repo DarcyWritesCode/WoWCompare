@@ -10,6 +10,7 @@ import PlayerTile from './PlayerTile';
 import './PlayerSelection.scss';
 import { usePageView } from 'interface/useGoogleAnalytics';
 import { i18n } from '@lingui/core';
+import { PlayerPerformance } from 'wowcompare/groupPerformance';
 
 const ROLE_SORT_KEY: Record<string, number> = {
   [ROLES.TANK]: 0,
@@ -43,9 +44,11 @@ interface Props {
   report: Report;
   players: PlayerDetails[];
   makeUrl: (playerId: number, build?: string) => string;
+  /** WoWCompare: each player's DPS or HPS against their spec's 95th percentile, by ID. */
+  performance?: Map<number, PlayerPerformance>;
 }
 
-const PlayerSelection = ({ report, players, makeUrl }: Props) => {
+const PlayerSelection = ({ report, players, makeUrl, performance }: Props) => {
   usePageView('PlayerSelection');
   return (
     <div className="player-selection">
@@ -54,6 +57,7 @@ const PlayerSelection = ({ report, players, makeUrl }: Props) => {
           key={player.id}
           player={player}
           makeUrl={makeUrl}
+          performance={performance?.get(player.id)}
           config={getConfig(wclGameVersionToBranch(report.gameVersion), player.specID ?? 0, player)}
         />
       ))}

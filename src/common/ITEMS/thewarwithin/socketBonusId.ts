@@ -433,6 +433,39 @@ const items = {
     id: 10597,
     socket: 1,
   },
+  // Midnight
+  12365: {
+    id: 12365,
+    socket: 1,
+  },
+  12666: {
+    id: 12666,
+    socket: 1,
+  },
+  12922: {
+    id: 12922,
+    socket: 1,
+  },
+  13534: {
+    id: 13534,
+    socket: 1,
+  },
+  13576: {
+    id: 13576,
+    socket: 1,
+  },
+  13668: {
+    id: 13668,
+    socket: 1,
+  },
+  13695: {
+    id: 13695,
+    socket: 1,
+  },
+  13750: {
+    id: 13750,
+    socket: 1,
+  },
 } as const satisfies Record<number, { id: number; socket: number }>;
 
 export default items;
