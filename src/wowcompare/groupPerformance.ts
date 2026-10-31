@@ -38,9 +38,28 @@ interface DeathsResponse {
   entries: { id: number; timestamp: number }[];
 }
 
+/** The fight analyzed; `pulledAt` is its start in Unix ms, which a ranked copy shares. */
+interface GroupFight {
+  id: number;
+  start: number;
+  end: number;
+  pulledAt: number;
+  boss: number;
+  difficulty?: number;
+}
+
+/**
+ * A ranked copy of a kill starts within this of another log's copy. Warcraft Logs ranks one copy
+ * when several raiders log the same kill, often not the report being viewed.
+ */
+const SAME_PULL_MS = 60_000;
+
 interface CharacterParse {
   reportID: string;
   fightID: number;
+  difficulty: number;
+  /** The fight's start, Unix ms. */
+  startTime: number;
   percentile: number;
   total: number;
 }
@@ -84,19 +103,21 @@ async function fetchDeaths(reportCode: string, start: number, end: number) {
 async function fetchParse(
   player: PlayerDetails,
   reportCode: string,
-  fightId: number,
-  encounterId: number,
+  fight: GroupFight,
 ): Promise<CharacterParse | null> {
   if (!player.server || !player.region) {
     return null;
   }
   const parses = (await fetchWcl(
     `parses/character/${encodeURIComponent(player.name)}/${encodeURIComponent(realmSlug(player.server))}/${player.region}`,
-    { metric: metricOf(player), encounter: encounterId },
+    { metric: metricOf(player), encounter: fight.boss },
   )) as unknown as CharacterParse[];
   return (
     (Array.isArray(parses) ? parses : []).find(
-      (parse) => parse.reportID === reportCode && parse.fightID === fightId,
+      (parse) =>
+        (parse.reportID === reportCode && parse.fightID === fight.id) ||
+        (parse.difficulty === fight.difficulty &&
+          Math.abs(parse.startTime - fight.pulledAt) < SAME_PULL_MS),
     ) ?? null
   );
 }
@@ -126,7 +147,7 @@ const settle = <T>(promise: Promise<T>) => promise.catch(() => null);
 
 async function fetchGroupPerformance(
   reportCode: string,
-  fight: { id: number; start: number; end: number; boss: number; difficulty?: number },
+  fight: GroupFight,
   players: PlayerDetails[],
 ) {
   const [damage, healing, deaths] = await Promise.all([
@@ -136,9 +157,7 @@ async function fetchGroupPerformance(
   ]);
   const specIds = [...new Set(players.map((p) => p.specID).filter((id): id is number => !!id))];
   const [parses, references] = await Promise.all([
-    Promise.all(
-      players.map((player) => settle(fetchParse(player, reportCode, fight.id, fight.boss))),
-    ),
+    Promise.all(players.map((player) => settle(fetchParse(player, reportCode, fight)))),
     Promise.all(
       specIds.map((specId) =>
         fight.difficulty ? settle(fetchReference(specId, fight.boss, fight.difficulty)) : null,
@@ -168,11 +187,11 @@ async function fetchGroupPerformance(
 /** Each player's performance by player ID; empty while loading or if nothing loads. */
 export function useGroupPerformance(
   reportCode: string,
-  fight: { id: number; start: number; end: number; boss: number; difficulty?: number },
+  fight: GroupFight,
   players: PlayerDetails[],
 ): Map<number, PlayerPerformance> {
   const [result, setResult] = useState(() => new Map<number, PlayerPerformance>());
-  const { id, start, end, boss, difficulty } = fight;
+  const { id, start, end, pulledAt, boss, difficulty } = fight;
   const playerKey = players.map((p) => p.id).join(',');
   useEffect(() => {
     let cancelled = false;
@@ -180,7 +199,7 @@ export function useGroupPerformance(
     if (players.length === 0) {
       return;
     }
-    fetchGroupPerformance(reportCode, { id, start, end, boss, difficulty }, players).then(
+    fetchGroupPerformance(reportCode, { id, start, end, pulledAt, boss, difficulty }, players).then(
       (performance) => !cancelled && setResult(performance),
       () => undefined,
     );
@@ -189,6 +208,6 @@ export function useGroupPerformance(
     };
     // The player list is refetched as a new array; refetch only when who's in it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportCode, id, start, end, boss, difficulty, playerKey]);
+  }, [reportCode, id, start, end, pulledAt, boss, difficulty, playerKey]);
   return result;
 }

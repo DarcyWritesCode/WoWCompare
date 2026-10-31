@@ -88,6 +88,7 @@ const PlayerLoader = ({ children }: Props) => {
       id: selectedFight.id,
       start: selectedFight.start_time,
       end: selectedFight.end_time,
+      pulledAt: selectedReport.start + selectedFight.start_time,
       boss: selectedFight.boss,
       difficulty: selectedFight.difficulty,
     },
