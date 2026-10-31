@@ -20,6 +20,7 @@ import { fetchCharacter } from 'interface/reducers/charactersById';
 import { useReport } from './context/ReportContext';
 import { PlayerPerformance } from 'wowcompare/groupPerformance';
 import PlayerPerformanceLine from 'wowcompare/ui/PlayerPerformanceLine';
+import { isLowActivity, PlayerActivity } from 'wowcompare/groupActivity';
 import { wclGameVersionToBranch } from 'game/VERSIONS';
 import GameBranch from 'game/GameBranch';
 
@@ -100,14 +101,19 @@ interface PlayerTileProps {
   config?: Config;
   /** WoWCompare: DPS or HPS against the spec's 95th percentile. */
   performance?: PlayerPerformance;
+  /** WoWCompare: active time against the spec's reference logs; outlined red when well below. */
+  activity?: PlayerActivity;
 }
+
+/** WoWCompare: a red outline for players well below their spec's active time. */
+const LOW_ACTIVITY_STYLE = { outline: '2px solid #d9534f', outlineOffset: -2 };
 
 // specs with performance issues during analysis. the "can i load this on my underpowered laptop" test is how things end up here.
 function isSpecDisabledInDungeons(spec: Spec): boolean {
   return false;
 }
 
-const PlayerTile = ({ player, makeUrl, config, performance }: PlayerTileProps) => {
+const PlayerTile = ({ player, makeUrl, config, performance, activity }: PlayerTileProps) => {
   const characterInfo = useWaSelector((state) => getCharacterById(state, player.guid));
   const dispatch = useWaDispatch();
   const { fight } = useFight();
@@ -171,7 +177,16 @@ const PlayerTile = ({ player, makeUrl, config, performance }: PlayerTileProps) =
   }
 
   return (
-    <Link to={makeUrl(player.id)} className={`player ${getClassName(spec.role)}`}>
+    <Link
+      to={makeUrl(player.id)}
+      className={`player ${getClassName(spec.role)}`}
+      style={isLowActivity(activity) ? LOW_ACTIVITY_STYLE : undefined}
+      title={
+        activity
+          ? `Active ${Math.round(activity.activeTime * 100)}% of their time alive; the spec's top logs average ${Math.round(activity.reference * 100)}%`
+          : undefined
+      }
+    >
       <PlayerTileContents avatar={avatar} player={player} spec={spec} performance={performance} />
     </Link>
   );

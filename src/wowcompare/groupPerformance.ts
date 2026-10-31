@@ -39,7 +39,7 @@ interface DeathsResponse {
 }
 
 /** The fight analyzed; `pulledAt` is its start in Unix ms, which a ranked copy shares. */
-interface GroupFight {
+export interface GroupFight {
   id: number;
   start: number;
   end: number;
@@ -122,9 +122,23 @@ async function fetchParse(
   );
 }
 
+const bundles = new Map<string, ReturnType<typeof fetchBenchmarkBundle>>();
+
+/** A spec's published bundle for the boss, fetched once per page; activity reads it too. */
+export function bundleFor(specId: number, encounterId: number, difficulty: number) {
+  const key = `${specId}:${encounterId}:${difficulty}`;
+  let bundle = bundles.get(key);
+  if (!bundle) {
+    bundle = fetchBenchmarkBundle(specId, encounterId, difficulty);
+    bundle.catch(() => bundles.delete(key));
+    bundles.set(key, bundle);
+  }
+  return bundle;
+}
+
 /** The median amount of the parses nearest the 95th percentile's rank, from the published pool. */
 async function fetchReference(specId: number, encounterId: number, difficulty: number) {
-  const bundle = await fetchBenchmarkBundle(specId, encounterId, difficulty);
+  const bundle = await bundleFor(specId, encounterId, difficulty);
   if (!bundle?.totalParses) {
     return null;
   }

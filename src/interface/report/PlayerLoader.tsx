@@ -29,6 +29,7 @@ import { getPlayerNameFromParam } from 'interface/selectors/url/report/getPlayer
 import GameBranch from 'game/GameBranch';
 import RaidPrepWarnings from 'wowcompare/ui/RaidPrepWarnings';
 import { useGroupPerformance } from 'wowcompare/groupPerformance';
+import { useGroupActivity } from 'wowcompare/groupActivity';
 
 interface Props {
   children: ReactNode;
@@ -81,19 +82,18 @@ const PlayerLoader = ({ children }: Props) => {
   }, [playerId, playerName, data?.players, selectedReport, selectedFight, navigate]);
 
   const retail = wclGameVersionToBranch(selectedReport.gameVersion) === GameBranch.Retail;
-  // WoWCompare: the player tiles' DPS/HPS, parse and 95th percentile; retail only.
-  const performance = useGroupPerformance(
-    selectedReport.code,
-    {
-      id: selectedFight.id,
-      start: selectedFight.start_time,
-      end: selectedFight.end_time,
-      pulledAt: selectedReport.start + selectedFight.start_time,
-      boss: selectedFight.boss,
-      difficulty: selectedFight.difficulty,
-    },
-    retail && !playerId ? (data?.players ?? NO_PLAYERS) : NO_PLAYERS,
-  );
+  // WoWCompare: the player tiles' DPS/HPS, parse and 95th percentile, and active time; retail only.
+  const groupFight = {
+    id: selectedFight.id,
+    start: selectedFight.start_time,
+    end: selectedFight.end_time,
+    pulledAt: selectedReport.start + selectedFight.start_time,
+    boss: selectedFight.boss,
+    difficulty: selectedFight.difficulty,
+  };
+  const groupPlayers = retail && !playerId ? (data?.players ?? NO_PLAYERS) : NO_PLAYERS;
+  const performance = useGroupPerformance(selectedReport.code, groupFight, groupPlayers);
+  const activity = useGroupActivity(selectedReport.code, groupFight, groupPlayers);
 
   const player = useMemo(
     () => data?.players.find((player) => player.id === playerId),
@@ -259,6 +259,7 @@ const PlayerLoader = ({ children }: Props) => {
           report={selectedReport}
           players={data.players}
           performance={performance}
+          activity={activity}
           makeUrl={(playerId) =>
             makeAnalyzerUrl(selectedReport, selectedFight.id, playerId, undefined)
           }
