@@ -888,7 +888,7 @@ async function publishEffects(config: Config, rows: EffectRow[], store: Store) {
 }
 
 /**
- * Collector mode (`--collect`, the idle hours between scheduled builds): parses extra logs spread
+ * Collector mode (`--collect`, a weekly run after Sunday's builds): parses extra logs spread
  * over `COLLECT_BAND` of the rankings, only for buff effects, spending WCL points the
  * schedule leaves unused. Specs with the fewest collected logs go first; each gets up to
  * `COLLECT_PER_BOSS` new logs per boss and difficulty, then its effects are refitted.

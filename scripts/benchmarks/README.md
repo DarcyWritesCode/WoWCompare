@@ -69,7 +69,7 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
 - **Data.** Any one boss's reference logs are far too few (no strategy was usable at 15 logs), so
   effects pool every boss and difficulty of a spec, over the most recent 3,000 logs within 28 days
   (`EFFECT_LOGS_PER_SPEC`), and need 200 logs per cooldown. Scheduled builds add their logs, and
-  collector runs (`--collect`, hourly 12:17–23:17 UTC, when no build runs) parse more spread over the
+  a weekly collector run (`--collect`, Sundays 13:17 UTC for up to 300 minutes, after the day's builds) parse more spread over the
   50–95th percentile (`COLLECT_BAND`), specs with the fewest logs first: wider and lower than the
   reference band, since the reference band's players rarely miss a line-up and effects need
   windows where one was missed. The rows live in the
@@ -127,17 +127,18 @@ windows. See `src/wowcompare/benchmarks/buffEffects.ts`.
   A spec is about 420 logs. The job checks `rateLimitData` every 15s and pauses every worker for
   the hourly reset before using the last 10%. If WCL still answers 429, it waits for the reset and
   retries. Logs already parsed with the same profile come from `actions/cache` and cost nothing.
-  Collector runs spend the hours builds leave idle, up to the same limit: roughly 6,000 logs a
-  day across all specs.
+  The weekly collector run spends up to five hours of that budget: a few thousand logs across
+  all specs, so effects fill in more slowly than with the hourly runs it replaced.
 - **Time.** Parsing stops at `--max-minutes` (110 by default, so a run ends before the next slot),
   and whatever is left waits for a free slot. A spec only counts as complete when every boss built;
   otherwise it's caught up. Changing what "complete" means (e.g. how reference logs are chosen)
   needs a bump of `STATUS_VERSION` in `published.ts`, which makes every spec due again.
 - **Actions minutes.** The repository is public, so GitHub-hosted runner minutes are free. The
-  schedule is 42 builds and 84 collector runs a week.
+  schedule is 42 builds and one collector run a week (it was 84 hourly collector runs, about 94%
+  of the job's minutes).
 - **KV writes.** The free plan allows 1,000 a day. A spec writes one profile, about 20 bundles,
-  its buff effects and the status: at most ~150 a day for builds. Collector runs write one
-  effects entry per spec they collect for: about 50 a day. Entries expire after 21 days, so a spec that misses two weeks
+  its buff effects and the status: at most ~150 a day for builds. The collector writes one
+  effects entry per spec it collects for: about 50 a week. Entries expire after 21 days, so a spec that misses two weeks
   drops out rather than going stale.
 
 ## Running it locally
