@@ -82,6 +82,27 @@ const OVERRIDES: Record<number, SpecOverrides> = {
     // A summon; the player has no buff for it.
     windowMs: { invoke_niuzao_the_black_ox: 25_000 },
   },
+  // SimC names for buffs no spell is called (its class modules give the spells), so the generic
+  // name matching never found them and they were never measured.
+  [SPECS.UNHOLY_DEATH_KNIGHT.id]: {
+    aliases: {
+      // SimC's spell, plus the Festering Scythe buff logs actually show.
+      festering_scythe_tt: { buff: [DEATH_KNIGHT.FESTERING_SCYTHE_BUFF.id, 458123] },
+    },
+  },
+  [SPECS.WINDWALKER_MONK.id]: {
+    aliases: {
+      heart_of_the_jade_serpent_unity_within: {
+        buff: [MONK.HEART_OF_THE_JADE_SERPENT_UNITY.id],
+      },
+    },
+  },
+  [SPECS.DEVASTATION_EVOKER.id]: {
+    aliases: { mass_disintegrate_stacks: { buff: [EVOKER.MASS_DISINTEGRATE_BUFF.id] } },
+  },
+  [SPECS.AUGMENTATION_EVOKER.id]: {
+    aliases: { ebon_might_self: { buff: [EVOKER.EBON_MIGHT_BUFF_PERSONAL.id] } },
+  },
   [SPECS.DEVOURER_DEMON_HUNTER.id]: {
     // The APL enters Void Metamorphosis from its hero-talent lists as `metamorphosis`. It costs
     // souls and has no cooldown; its window is the form's buff (~40 s), which has its own ID. The
