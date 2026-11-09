@@ -65,6 +65,9 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # For the SimC commit dates on the specs page (GitHub's API limit is higher with a token).
           GITHUB_TOKEN: ${{ github.token }}
+          # Twelve logs parse at once, and a long Mythic log can take hundreds of MB; Node's
+          # default heap (about 4 GB) ran out. The runner has 16 GB.
+          NODE_OPTIONS: --max-old-space-size=8192
       - if: steps.run.outputs.redeploy == 'true'
         run: gh workflow run deploy-pages.yml --ref main
         env:
@@ -74,3 +77,12 @@ jobs:
         with:
           path: node_modules/.cache/wc-benchmarks-cache
           key: wc-benchmarks-${{ github.run_id }}
+      # Each run saves a new ~350 MB cache, and only the newest is restored; delete the rest so
+      # they don't pile up past the repository's 10 GB of cache storage.
+      - if: always()
+        run: |
+          gh cache list --key wc-benchmarks- --sort created_at --order desc --limit 100 --json id --jq '.[1:][].id' |
+            xargs -r -n1 gh cache delete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
