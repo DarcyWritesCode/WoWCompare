@@ -210,29 +210,47 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
     setParsed(parsedRef.current);
   };
 
-  const load = async (kind: BenchmarkKind, current = selection) => {
-    if (!inputs || !current || busyRef.current) {
+  /** Parses `parses` in the browser, one batch at a time, reporting progress as `label`. */
+  const parseWithStatus = async (
+    label: string,
+    parses: RankedParse[],
+    onParsed: (fresh: Map<string, LogSnapshot | null>) => void,
+  ) => {
+    if (!inputs || busyRef.current) {
       return;
     }
-    const parses = parsesFor(current, kind).filter((p) => !parsedRef.current.has(parseKey(p)));
     busyRef.current = true;
     setBusy(true);
     try {
       let done = 0;
-      setStatus(`Loading ${BENCHMARK_LABELS[kind]}: 0 / ${parses.length} logs`);
-      const fresh = await parseAll(inputs.config, inputs.profile, parses, () => {
-        done += 1;
-        setStatus(`Loading ${BENCHMARK_LABELS[kind]}: ${done} / ${parses.length} logs`);
-      });
-      addParsed(fresh);
-      setLoaded((previous) => (previous.includes(kind) ? previous : [...previous, kind]));
+      setStatus(`Loading ${label}: 0 / ${parses.length} logs`);
+      onParsed(
+        await parseAll(inputs.config, inputs.profile, parses, () => {
+          done += 1;
+          setStatus(`Loading ${label}: ${done} / ${parses.length} logs`);
+        }),
+      );
       setStatus(null);
     } catch (err) {
-      setStatus(`Failed to load ${BENCHMARK_LABELS[kind]}: ${(err as Error).message}`);
+      setStatus(`Failed to load ${label}: ${(err as Error).message}`);
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
+  };
+
+  const load = async (kind: BenchmarkKind, current = selection) => {
+    if (!current) {
+      return;
+    }
+    await parseWithStatus(
+      BENCHMARK_LABELS[kind],
+      parsesFor(current, kind).filter((p) => !parsedRef.current.has(parseKey(p))),
+      (fresh) => {
+        addParsed(fresh);
+        setLoaded((previous) => (previous.includes(kind) ? previous : [...previous, kind]));
+      },
+    );
   };
 
   // Rankings, the #1 parse and the reference logs load as soon as the tab opens.
@@ -449,6 +467,8 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
       columns,
       logs,
       reference,
+      // Published before cast timelines: the job's snapshots of these have no casts.
+      withoutCasts: pick.picked.filter((parse) => !snapshotOf(parse)?.timeline?.casts),
       playerResults: rescoreAgainst(inputs.playerResults, referenceResults),
     };
   }, [inputs, selection, parsed, loaded, excludeBuffed]);
@@ -476,6 +496,17 @@ export default function useBenchmarks(inputs: BenchmarkInputs | undefined, exclu
     columns: derived?.columns ?? null,
     logs: derived?.logs ?? [],
     reference: derived?.reference ?? null,
+    /** Reference logs whose published snapshots predate cast timelines. */
+    referencesWithoutCasts: derived?.withoutCasts.length ?? 0,
+    /**
+     * Parses those logs in the browser, so the casts timeline needn't wait for the benchmark job.
+     * A log that fails keeps its published snapshot.
+     */
+    loadReferenceCasts: () =>
+      derived &&
+      parseWithStatus(`${REFERENCE_LABEL} casts`, derived.withoutCasts, (fresh) =>
+        addParsed(new Map([...fresh].filter(([, snapshot]) => snapshot))),
+      ),
     playerResults: derived?.playerResults ?? null,
   };
 }

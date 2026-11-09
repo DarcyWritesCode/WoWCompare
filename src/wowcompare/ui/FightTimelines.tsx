@@ -8,20 +8,20 @@ import { CHART_COLORS } from './charts';
 
 /** SVG user units across; charts stretch to the panel's width. */
 const WIDTH = 1000;
-const DPS_HEIGHT = 120;
+const LINE_HEIGHT = 120;
 const ROW_HEIGHT = 20;
 /** How long a cast of a cooldown without a buff window is drawn. */
 const CAST_TICK_MS = 2_000;
 const LABEL_WIDTH = 160;
-/** Bucket size of the band shares and the smoothed DPS lines. */
+/** Bucket size of the band shares and the smoothed DPS and cast lines. */
 const BUCKET_MS = 2_000;
-/** Buckets averaged either side when smoothing DPS lines. */
+/** Buckets averaged either side when smoothing the lines. */
 const SMOOTHING = 2;
 /** Time ticks are the first of these steps (seconds) giving at most this many ticks. */
 const TIME_STEPS = [15, 30, 60, 120, 300];
 const MAX_TIME_TICKS = 10;
-/** Horizontal grid lines on the DPS charts, above zero. */
-const DPS_TICKS = 4;
+/** Horizontal grid lines on the line charts, above zero. */
+const VALUE_TICKS = 4;
 const GRID_COLOR = 'rgba(255, 255, 255, 0.12)';
 const CROSSHAIR_COLOR = 'rgba(255, 255, 255, 0.5)';
 /** The reference line stops once fewer than this share of its logs are still fighting. */
@@ -76,18 +76,14 @@ const activeSpans = (set: LogSnapshot['windows'][number] | undefined): [number, 
       ? set.windows.map((w): [number, number] => [w.startMs, w.startMs + w.durationMs])
       : (set.castMs ?? []).map((t): [number, number] => [t, t + CAST_TICK_MS]);
 
-/** Re-buckets a log's timeline to `BUCKET_MS` and smooths it. */
-function dpsSeries(log: LogSnapshot, buckets: number): number[] | null {
-  const timeline = log.timeline;
-  if (!timeline) {
-    return null;
-  }
+/** Re-buckets a per-second rate on a log's timeline to `BUCKET_MS` and smooths it. */
+function smoothed(rates: number[], bucketMs: number, buckets: number): number[] {
   const raw = new Array(buckets).fill(0);
-  const per = BUCKET_MS / timeline.bucketMs;
-  timeline.dps.forEach((dps, i) => {
+  const per = BUCKET_MS / bucketMs;
+  rates.forEach((rate, i) => {
     const j = Math.floor(i / per);
     if (j < buckets) {
-      raw[j] += dps / per;
+      raw[j] += rate / per;
     }
   });
   return raw.map((_, i) => {
@@ -95,6 +91,57 @@ function dpsSeries(log: LogSnapshot, buckets: number): number[] | null {
     return window.reduce((a, b) => a + b, 0) / window.length;
   });
 }
+
+const dpsSeries = (log: LogSnapshot, buckets: number): number[] | null =>
+  log.timeline ? smoothed(log.timeline.dps, log.timeline.bucketMs, buckets) : null;
+
+/** Casts per second; null for logs from before cast timelines. */
+function castSeries(log: LogSnapshot, buckets: number): number[] | null {
+  const timeline = log.timeline;
+  if (!timeline?.casts) {
+    return null;
+  }
+  const perSecond = 1000 / timeline.bucketMs;
+  return smoothed(
+    timeline.casts.map((casts) => casts * perSecond),
+    timeline.bucketMs,
+    buckets,
+  );
+}
+
+/** Casts per second over the whole fight. */
+const fightCastRate = (log: LogSnapshot) =>
+  log.durationMs > 0
+    ? ((log.timeline?.casts ?? []).reduce((a, b) => a + b, 0) / log.durationMs) * 1000
+    : 0;
+
+/** Per bucket, the mean over the logs still fighting, while enough of them are. */
+function meanSeries(series: { log: LogSnapshot; values: number[] }[], buckets: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < buckets; i += 1) {
+    const alive = series.filter(({ log }) => log.durationMs > i * BUCKET_MS);
+    if (alive.length === 0 || alive.length < series.length * MIN_ALIVE) {
+      break;
+    }
+    out.push(alive.reduce((sum, { values }) => sum + values[i], 0) / alive.length);
+  }
+  return out;
+}
+
+/** A round scale top for a pair of charts, and its tick step. */
+function scaleOf(...series: number[][]) {
+  const peak = Math.max(...series.flat(), Number.EPSILON);
+  const step = niceStep(peak, VALUE_TICKS);
+  return { max: Math.ceil(peak / step) * step, step };
+}
+
+/** What a line chart plots: DPS, or casts per second. */
+interface Measure {
+  unit: string;
+  format: (value: number) => string;
+}
+const DPS: Measure = { unit: 'DPS', format: (dps) => formatNumber(dps) };
+const CASTS: Measure = { unit: 'casts/s', format: (rate) => rate.toFixed(rate < 10 ? 1 : 0) };
 
 /** Consecutive buckets with the same non-zero value, as one run each (drawn without seams). */
 function runs(values: number[]) {
@@ -165,11 +212,13 @@ interface Hover {
 const Timeline = createContext<{
   /** Time ticks as x positions in SVG units. */
   ticks: number[];
+  /** The same ticks in ms from the pull, for the time labels. */
+  ticksMs: number[];
   axisMs: number;
   buckets: number;
   hover: Hover | null;
   setHover: (hover: Hover | null) => void;
-}>({ ticks: [], axisMs: 1, buckets: 1, hover: null, setHover: () => undefined });
+}>({ ticks: [], ticksMs: [], axisMs: 1, buckets: 1, hover: null, setHover: () => undefined });
 
 /** The bands up in a bucket, for tooltips: on or off for the player, a share of the logs otherwise. */
 function bandsAt(bands: BandShares, bucket: number, logs?: number): ReactNode[] {
@@ -317,13 +366,13 @@ function Frame({
   );
 }
 
-function DpsChart({
+function LineChart({
   id,
   title,
+  measure,
   series,
   average,
-  maxDps,
-  dpsStep,
+  scale,
   bands,
   buckets,
   color,
@@ -331,11 +380,11 @@ function DpsChart({
 }: {
   id: string;
   title: ReactNode;
+  measure: Measure;
   series: number[];
   average: number;
-  /** The scale's top, a multiple of `dpsStep`; shared by both DPS charts. */
-  maxDps: number;
-  dpsStep: number;
+  /** The scale's top, a multiple of `step`; shared by the pair of charts. */
+  scale: { max: number; step: number };
   bands: BandShares;
   buckets: number;
   color: string;
@@ -343,13 +392,17 @@ function DpsChart({
   logs?: number;
 }) {
   const x = (i: number) => ((i + 0.5) / buckets) * WIDTH;
-  const y = (dps: number) => DPS_HEIGHT - (Math.min(dps, maxDps) / maxDps) * DPS_HEIGHT;
-  const points = series.map((dps, i) => `${x(i)},${y(dps)}`);
-  const dpsTicks = Array.from({ length: Math.round(maxDps / dpsStep) + 1 }, (_, i) => i * dpsStep);
+  const { max, step } = scale;
+  const y = (value: number) => LINE_HEIGHT - (Math.min(value, max) / max) * LINE_HEIGHT;
+  const points = series.map((value, i) => `${x(i)},${y(value)}`);
+  const valueTicks = Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step);
   return (
     <>
       <h4 style={{ marginBottom: 4 }}>
-        {title} <small className="text-muted">{formatNumber(average)} DPS over the fight</small>
+        {title}{' '}
+        <small className="text-muted">
+          {measure.format(average)} {measure.unit} over the fight
+        </small>
       </h4>
       {/* An axis, not a value: both charts share the scale, which tops out above the higher peak. */}
       <Frame
@@ -357,7 +410,9 @@ function DpsChart({
         tooltip={(bucket) => (
           <>
             <div style={{ color }}>
-              {bucket < series.length ? `${formatNumber(series[bucket])} DPS` : 'Fight over'}
+              {bucket < series.length
+                ? `${measure.format(series[bucket])} ${measure.unit}`
+                : 'Fight over'}
             </div>
             {bandsAt(bands, bucket, logs)}
           </>
@@ -367,41 +422,41 @@ function DpsChart({
             className="text-muted"
             style={{ position: 'relative', display: 'block', height: '100%', fontSize: '0.9em' }}
           >
-            {dpsTicks.map((dps) => (
+            {valueTicks.map((value) => (
               <span
-                key={dps}
+                key={value}
                 style={{
                   position: 'absolute',
                   right: 0,
-                  top: y(dps),
-                  transform: `translateY(${dps === 0 ? -100 : dps === maxDps ? 0 : -50}%)`,
+                  top: y(value),
+                  transform: `translateY(${value === 0 ? -100 : value === max ? 0 : -50}%)`,
                   lineHeight: 1,
                 }}
               >
-                {formatNumber(dps)}
+                {measure.format(value)}
               </span>
             ))}
           </span>
         }
-        height={DPS_HEIGHT}
+        height={LINE_HEIGHT}
       >
-        {dpsTicks.map((dps) => (
+        {valueTicks.map((value) => (
           <line
-            key={dps}
+            key={value}
             x1={0}
             x2={WIDTH}
-            y1={y(dps)}
-            y2={y(dps)}
+            y1={y(value)}
+            y2={y(value)}
             stroke={GRID_COLOR}
             strokeWidth={1}
             vectorEffect="non-scaling-stroke"
           />
         ))}
-        <BandLanes bands={bands} buckets={buckets} height={DPS_HEIGHT} logs={logs} />
+        <BandLanes bands={bands} buckets={buckets} height={LINE_HEIGHT} logs={logs} />
         {points.length > 1 && (
           <>
             <polygon
-              points={`${x(0)},${DPS_HEIGHT} ${points.join(' ')} ${x(series.length - 1)},${DPS_HEIGHT}`}
+              points={`${x(0)},${LINE_HEIGHT} ${points.join(' ')} ${x(series.length - 1)},${LINE_HEIGHT}`}
               fill={color}
               opacity={0.15}
             />
@@ -427,6 +482,85 @@ function DpsChart({
         />
       </Frame>
     </>
+  );
+}
+
+/** Steps the reference charts between the logs' mean and each log on its own. */
+function ReferencePicker({
+  picked,
+  count,
+  onPick,
+}: {
+  /** The log shown, or null for the mean. */
+  picked: number | null;
+  count: number;
+  onPick: (picked: number | null) => void;
+}) {
+  // The mean, then each log, wrapping around.
+  const step = (by: number) => {
+    const next = ((picked === null ? 0 : picked + 1) + by + count + 1) % (count + 1);
+    onPick(next === 0 ? null : next - 1);
+  };
+  const button = (label: string, title: string, by: number) => (
+    <button
+      type="button"
+      title={title}
+      onClick={() => step(by)}
+      style={{
+        background: 'transparent',
+        color: 'inherit',
+        border: '1px solid rgba(255, 255, 255, 0.3)',
+        borderRadius: 3,
+        width: 24,
+        lineHeight: '18px',
+        padding: 0,
+      }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <span style={{ whiteSpace: 'nowrap', marginRight: 10 }}>
+      {button('‹', 'Previous log', -1)}
+      <span
+        className="text-muted"
+        style={{ display: 'inline-block', minWidth: 64, textAlign: 'center' }}
+      >
+        {picked === null ? 'Mean' : `${picked + 1} / ${count}`}
+      </span>
+      {button('›', 'Next log', 1)}
+    </span>
+  );
+}
+
+/** Time labels under a pair of charts. */
+function TimeAxis() {
+  const { ticksMs, axisMs } = useContext(Timeline);
+  return (
+    <div
+      className="text-muted"
+      style={{
+        fontSize: '0.85em',
+        marginLeft: LABEL_WIDTH + 8,
+        marginBottom: 12,
+        position: 'relative',
+        height: 18,
+      }}
+    >
+      {ticksMs.map((ms, i) => (
+        <span
+          key={ms}
+          style={{
+            position: 'absolute',
+            left: `${(ms / axisMs) * 100}%`,
+            transform: i === 0 ? undefined : 'translateX(-50%)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {formatDuration(ms)}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -492,28 +626,54 @@ function CooldownChart({
 }
 
 /**
- * The fight as four aligned timelines: the player's DPS and the reference logs' mean DPS, then the
- * player's cooldowns and how often the reference logs had each up. Every chart carries Bloodlust,
+ * The fight as aligned pairs of timelines, the player's over the reference logs': DPS (the logs'
+ * mean), casts per second (the logs' mean, so the player's downtime shows against the references'
+ * uptime), then cooldowns (how often the logs had each up). Every chart carries Bloodlust,
  * damage potion and damage amp bands in stacked lanes; on the reference charts their strength is
- * the share of logs with the band up at that moment. Time runs from the pull in every chart.
+ * the share of logs with the band up at that moment. Time runs from the pull in every chart. The
+ * reference charts step together from the mean to each reference log on its own.
  */
 export default function FightTimelines({
   player,
   playerAmpWindows,
-  references,
+  references: allReferences,
+  referenceNames = [],
   referenceLabel,
+  castParsing,
 }: {
   player: LogSnapshot;
   /** The player's amp windows, ms from the pull; undefined while loading or without any. */
   playerAmpWindows?: [number, number][];
   references: LogSnapshot[];
+  /** Each reference log's name for its own charts, e.g. "Name (#463)"; in `references`' order. */
+  referenceNames?: string[];
   referenceLabel: string;
+  /** Reference logs without casts (published before cast timelines), and parsing them here. */
+  castParsing?: { missing: number; load: () => void; busy: boolean; status: string | null };
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
+  const [pickedState, setPicked] = useState<number | null>(null);
+  // The reference logs can change under the picker (e.g. a cooldown filter); fall back to the mean.
+  const picked = pickedState !== null && pickedState < allReferences.length ? pickedState : null;
+  const references = picked === null ? allReferences : [allReferences[picked]];
   const withTimeline = references.filter((log) => log.timeline);
+  // Shares for the mean; a single log shows on or off, like the player's.
+  const logCount = (logs: LogSnapshot[]) => (picked === null ? logs.length : undefined);
+  const pickedName =
+    picked === null ? null : referenceNames[picked] || `${referenceLabel} log ${picked + 1}`;
+  /** `mean` describes the logs' mean, `single` one log's own chart. */
+  const referenceTitle = (mean: string, single: string) => (
+    <>
+      {allReferences.length > 1 && (
+        <ReferencePicker picked={picked} count={allReferences.length} onPick={setPicked} />
+      )}
+      {pickedName === null ? `${referenceLabel}: ${mean}` : `${pickedName}: ${single}`}
+    </>
+  );
   const spanMs = Math.max(
     player.durationMs,
-    median(withTimeline.map((log) => log.durationMs)) ?? 0,
+    median(allReferences.filter((log) => log.timeline).map((log) => log.durationMs)) ?? 0,
+    picked === null ? 0 : allReferences[picked].durationMs,
   );
   const buckets = Math.max(1, Math.ceil(spanMs / BUCKET_MS));
 
@@ -538,21 +698,21 @@ export default function FightTimelines({
   };
 
   const playerDps = dpsSeries(player, buckets) ?? [];
-  const referenceSeries = withTimeline.map((log) => ({ log, dps: dpsSeries(log, buckets)! }));
-  // Mean over the logs still fighting at each moment, while enough of them are.
-  const referenceDps: number[] = [];
-  for (let i = 0; i < buckets; i += 1) {
-    const alive = referenceSeries.filter(({ log }) => log.durationMs > i * BUCKET_MS);
-    if (alive.length < Math.max(1, withTimeline.length * MIN_ALIVE)) {
-      break;
-    }
-    referenceDps.push(alive.reduce((sum, { dps }) => sum + dps[i], 0) / alive.length);
-  }
+  const referenceDps = meanSeries(
+    withTimeline.map((log) => ({ log, values: dpsSeries(log, buckets)! })),
+    buckets,
+  );
   const referenceAverage = median(withTimeline.map((log) => log.fightDps)) ?? 0;
   // A round scale top, so the evenly spaced ticks land on round numbers.
-  const peak = Math.max(1, ...playerDps, ...referenceDps);
-  const dpsStep = niceStep(peak, DPS_TICKS);
-  const maxDps = Math.ceil(peak / dpsStep) * dpsStep;
+  const dpsScale = scaleOf(playerDps, referenceDps);
+
+  const playerCasts = castSeries(player, buckets);
+  const withCasts = withTimeline.filter((log) => log.timeline?.casts);
+  const referenceCasts = meanSeries(
+    withCasts.map((log) => ({ log, values: castSeries(log, buckets)! })),
+    buckets,
+  );
+  const castScale = scaleOf(playerCasts ?? [], referenceCasts);
   const axisMs = buckets * BUCKET_MS;
   const ticksMs = timeTicks(spanMs);
 
@@ -570,6 +730,7 @@ export default function FightTimelines({
     <Timeline.Provider
       value={{
         ticks: ticksMs.map((ms) => (ms / axisMs) * WIDTH),
+        ticksMs,
         axisMs,
         buckets,
         hover,
@@ -597,34 +758,86 @@ export default function FightTimelines({
         <span>Bands are stacked in that order, top to bottom. Dashed line: fight average.</span>
       </div>
 
-      <DpsChart
+      <LineChart
         id="you"
         title="Your DPS"
+        measure={DPS}
         series={playerDps}
         average={player.fightDps}
-        maxDps={maxDps}
-        dpsStep={dpsStep}
+        scale={dpsScale}
         bands={playerBands}
         buckets={buckets}
         color={CHART_COLORS.you}
       />
-      {withTimeline.length > 0 ? (
-        <DpsChart
+      {withTimeline.length > 0 && (
+        <LineChart
           id="reference"
-          title={`${referenceLabel}: mean DPS of ${withTimeline.length} logs`}
+          title={referenceTitle(`mean DPS of ${withTimeline.length} logs`, 'DPS')}
+          measure={DPS}
           series={referenceDps}
           average={referenceAverage}
-          maxDps={maxDps}
-          dpsStep={dpsStep}
+          scale={dpsScale}
           bands={referenceBands}
           buckets={buckets}
           color={CHART_COLORS.reference}
-          logs={withTimeline.length}
+          logs={logCount(withTimeline)}
         />
-      ) : (
+      )}
+      <TimeAxis />
+      {withTimeline.length === 0 && (
         <p className="text-muted">
           {referenceLabel} timelines appear once this spec's benchmarks are next rebuilt.
         </p>
+      )}
+
+      {playerCasts && (
+        <>
+          <LineChart
+            id="your-casts"
+            title="Your casts per second"
+            measure={CASTS}
+            series={playerCasts}
+            average={fightCastRate(player)}
+            scale={castScale}
+            bands={playerBands}
+            buckets={buckets}
+            color={CHART_COLORS.you}
+          />
+          {withCasts.length > 0 && (
+            <LineChart
+              id="reference-casts"
+              title={referenceTitle(
+                `mean casts per second of ${withCasts.length} logs`,
+                'casts per second',
+              )}
+              measure={CASTS}
+              series={referenceCasts}
+              average={median(withCasts.map(fightCastRate)) ?? 0}
+              scale={castScale}
+              bands={referenceBands}
+              buckets={buckets}
+              color={CHART_COLORS.reference}
+              logs={logCount(withTimeline)}
+            />
+          )}
+          <TimeAxis />
+          {castParsing && castParsing.missing > 0 && (
+            <p className="text-muted">
+              {castParsing.missing} {referenceLabel} logs were published before cast timelines;
+              they'll have casts when this spec's benchmarks are next rebuilt.{' '}
+              {castParsing.status ?? (
+                <button
+                  type="button"
+                  className="btn btn-default btn-sm"
+                  disabled={castParsing.busy}
+                  onClick={castParsing.load}
+                >
+                  Parse them in your browser now
+                </button>
+              )}
+            </p>
+          )}
+        </>
       )}
 
       <CooldownChart
@@ -637,37 +850,18 @@ export default function FightTimelines({
       {references.length > 0 && (
         <CooldownChart
           id="reference-cooldowns"
-          title={`${referenceLabel}: share of ${references.length} logs with each cooldown up`}
+          title={referenceTitle(
+            `share of ${references.length} logs with each cooldown up`,
+            'cooldowns',
+          )}
           rows={cooldownRows.map((set) => ({ ...set, active: activeShare(references, set.token) }))}
           bands={referenceBands}
           buckets={buckets}
-          logs={references.length}
-          bandLogs={withTimeline.length}
+          logs={logCount(references)}
+          bandLogs={logCount(withTimeline)}
         />
       )}
-      <div
-        className="text-muted"
-        style={{
-          fontSize: '0.85em',
-          marginLeft: LABEL_WIDTH + 8,
-          position: 'relative',
-          height: 18,
-        }}
-      >
-        {ticksMs.map((ms, i) => (
-          <span
-            key={ms}
-            style={{
-              position: 'absolute',
-              left: `${(ms / axisMs) * 100}%`,
-              transform: i === 0 ? undefined : 'translateX(-50%)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {formatDuration(ms)}
-          </span>
-        ))}
-      </div>
+      <TimeAxis />
     </Timeline.Provider>
   );
 }

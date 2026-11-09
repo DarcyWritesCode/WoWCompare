@@ -3,7 +3,8 @@ import ROLES from 'game/ROLES';
 import EVOKER from 'common/SPELLS/evoker';
 import SPECS from 'game/SPECS';
 import Analyzer, { Options, SELECTED_PLAYER } from 'parser/core/Analyzer';
-import Events, { ApplyBuffEvent, RemoveBuffEvent } from 'parser/core/Events';
+import CASTS_THAT_ARENT_CASTS from 'parser/core/CASTS_THAT_ARENT_CASTS';
+import Events, { ApplyBuffEvent, CastEvent, RemoveBuffEvent } from 'parser/core/Events';
 
 import { getBuiltProfile, getProfile } from '../profile/registry';
 import { Profile } from '../profile/types';
@@ -66,16 +67,27 @@ class ProfileMetrics extends Analyzer {
   /** Augmentation: time each ally had the player's Ebon Might or Prescience, ms. */
   private readonly buffedMs = new Map<number, number>();
   private readonly buffedSince = new Map<string, number>();
+  /** The player's casts, for the fight timeline; auto attacks aren't casts. */
+  private readonly castTimes: number[] = [];
 
   constructor(options: Options) {
     super(options);
     const specId = this.selectedCombatant.spec?.id;
     this.profile = specId === undefined ? undefined : getProfile(specId);
     this.active = this.profile !== undefined;
+    if (this.active) {
+      this.addEventListener(Events.cast.by(SELECTED_PLAYER), this.onCast);
+    }
     if (this.active && specId === SPECS.AUGMENTATION_EVOKER.id) {
       const buffs = [EVOKER.EBON_MIGHT_BUFF_EXTERNAL, EVOKER.PRESCIENCE_BUFF];
       this.addEventListener(Events.applybuff.by(SELECTED_PLAYER).spell(buffs), this.onAllyBuff);
       this.addEventListener(Events.removebuff.by(SELECTED_PLAYER).spell(buffs), this.onAllyBuff);
+    }
+  }
+
+  private onCast(event: CastEvent) {
+    if (!CASTS_THAT_ARENT_CASTS.includes(event.ability.guid)) {
+      this.castTimes.push(event.timestamp);
     }
   }
 
@@ -325,21 +337,29 @@ class ProfileMetrics extends Analyzer {
     return { primary: stats[primaryStat] };
   }
 
-  /** DPS per `TIMELINE_BUCKET_MS` over the whole fight, rounded. */
+  /** DPS and casts per `TIMELINE_BUCKET_MS` over the whole fight, DPS rounded. */
   private timeline(): LogSnapshot['timeline'] {
     const start = this.owner.fight.start_time;
     const buckets = new Array(
       Math.max(1, Math.ceil((this.owner.fight.end_time - start) / TIMELINE_BUCKET_MS)),
     ).fill(0);
+    const casts = new Array(buckets.length).fill(0);
     for (const hit of this.damageTimeline.damage) {
       const i = Math.floor((hit.timestamp - start) / TIMELINE_BUCKET_MS);
       if (i >= 0 && i < buckets.length) {
         buckets[i] += hit.amount;
       }
     }
+    for (const timestamp of this.castTimes) {
+      const i = Math.floor((timestamp - start) / TIMELINE_BUCKET_MS);
+      if (i >= 0 && i < casts.length) {
+        casts[i] += 1;
+      }
+    }
     return {
       bucketMs: TIMELINE_BUCKET_MS,
       dps: buckets.map((damage) => Math.round((damage / TIMELINE_BUCKET_MS) * 1000)),
+      casts,
     };
   }
 

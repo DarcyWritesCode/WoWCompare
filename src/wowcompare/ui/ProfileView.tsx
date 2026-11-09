@@ -325,6 +325,8 @@ export default function ProfileView({
     columns,
     logs,
     reference,
+    referencesWithoutCasts,
+    loadReferenceCasts,
     playerResults,
   } = useBenchmarks(inputs, normalization.externalBuffs);
   const results = playerResults ?? snapshot.results;
@@ -576,7 +578,20 @@ export default function ProfileView({
           player={snapshot}
           playerAmpWindows={playerAmpWindows}
           references={reference?.logs ?? []}
+          referenceNames={(reference?.logs ?? []).map((snapshot) => {
+            const log = logs.find((l) => l.snapshot === snapshot);
+            const rank = log?.roles.find((role) => role.startsWith('Reference '));
+            return log
+              ? `${log.playerName}${rank ? ` (${rank.slice('Reference '.length)})` : ''}`
+              : '';
+          })}
           referenceLabel={REFERENCE_LABEL}
+          castParsing={{
+            missing: referencesWithoutCasts,
+            load: () => void loadReferenceCasts(),
+            busy,
+            status,
+          }}
         />
         {damageWindowInputs && (
           <>

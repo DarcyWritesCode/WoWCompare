@@ -266,8 +266,11 @@ export interface LogSnapshot {
   activeTime?: number;
   /** Time the player was alive in the fight. Absent from older bundles. */
   aliveMs?: number;
-  /** DPS over the whole fight, per `bucketMs` from the pull. Absent from older bundles. */
-  timeline?: { bucketMs: number; dps: number[] };
+  /**
+   * DPS and the player's cast count over the whole fight, per `bucketMs` from the pull. Absent
+   * from older bundles; `casts` from bundles before cast timelines.
+   */
+  timeline?: { bucketMs: number; dps: number[]; casts?: number[] };
   /** Bloodlust (any source) on the player: [start, end] ms from the pull. */
   lust?: [number, number][];
   /** The player's damage potions: [start, end] ms from the pull. */
